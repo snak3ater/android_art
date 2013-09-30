@@ -832,15 +832,12 @@ const DexFile* ClassLinker::FindOrCreateOatFileForDexLocationLocked(const std::s
   RegisterOatFileLocked(*oat_file);
   const OatFile::OatDexFile* oat_dex_file = oat_file->GetOatDexFile(dex_location, &dex_location_checksum);
   if (oat_dex_file == NULL) {
-    LOG(ERROR) << "Failed to find dex file " << dex_location
-               << " (checksum " << dex_location_checksum
-               << ") in generated oat file: " << oat_location;
+    LOG(ERROR) << "Failed to find dex file " << dex_location << " in generated oat file: " << oat_location;
     return NULL;
   }
   const DexFile* result = oat_dex_file->OpenDexFile();
-  CHECK_EQ(dex_location_checksum, result->GetLocationChecksum())
-          << "dex_location=" << dex_location << " oat_location=" << oat_location << std::hex
-          << " dex_location_checksum=" << dex_location_checksum
+  CHECK_EQ(dex_location_checksum, result->GetLocationChecksum()) << std::hex
+          << "dex_location_checksum=" << dex_location_checksum
           << " DexFile::GetLocationChecksum()=" << result->GetLocationChecksum();
   return result;
 }
