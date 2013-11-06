@@ -18,8 +18,7 @@
 
 #include "base/mutex.h"
 #include "runtime.h"
-#include "thread.h"
-#include "UniquePtr.h"
+#include "thread-inl.h"
 #include "utils.h"
 
 namespace art {
