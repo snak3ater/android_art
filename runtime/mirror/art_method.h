@@ -155,7 +155,7 @@ class MANAGED ArtMethod : public Object {
   }
 
   // Number of 32bit registers that would be required to hold all the arguments
-  static size_t NumArgRegisters(const StringPiece& shorty);
+  static uint32_t NumArgRegisters(const StringPiece& shorty);
 
   uint32_t GetDexMethodIndex() const;
 
