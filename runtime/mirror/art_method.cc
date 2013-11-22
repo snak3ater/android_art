@@ -84,7 +84,7 @@ void ArtMethod::SetDexCacheInitializedStaticStorage(ObjectArray<StaticStorageBas
       new_value, false);
 }
 
-size_t ArtMethod::NumArgRegisters(const StringPiece& shorty) {
+uint32_t ArtMethod::NumArgRegisters(const StringPiece& shorty) {
   CHECK_LE(1, shorty.length());
   uint32_t num_registers = 0;
   for (int i = 1; i < shorty.length(); ++i) {
