@@ -210,6 +210,8 @@ class MethodVerifier {
   static void Init() SHARED_LOCKS_REQUIRED(Locks::mutator_lock_);
   static void Shutdown();
 
+  static void AddRejectedClass(ClassReference ref)
+      LOCKS_EXCLUDED(rejected_classes_lock_);
   static bool IsClassRejected(ClassReference ref)
       LOCKS_EXCLUDED(rejected_classes_lock_);
 
@@ -660,9 +662,6 @@ class MethodVerifier {
   typedef std::set<ClassReference> RejectedClassesTable;
   static ReaderWriterMutex* rejected_classes_lock_ DEFAULT_MUTEX_ACQUIRED_AFTER;
   static RejectedClassesTable* rejected_classes_ GUARDED_BY(rejected_classes_lock_);
-
-  static void AddRejectedClass(ClassReference ref)
-      LOCKS_EXCLUDED(rejected_classes_lock_);
 
   RegTypeCache reg_types_;
 
