@@ -75,7 +75,14 @@ TEST_F(OatTest, WriteRead) {
   CompilerBackend compiler_backend = kQuick;
 #endif
   InstructionSet insn_set = kIsTargetBuild ? kThumb2 : kX86;
-  compiler_driver_.reset(new CompilerDriver(compiler_backend, insn_set, false, NULL, 2, true));
+
+  InstructionSetFeatures insn_features;
+  verified_methods_data_.reset(new VerifiedMethodsData);
+  method_inliner_map_.reset(new DexFileToMethodInlinerMap);
+  compiler_driver_.reset(new CompilerDriver(verified_methods_data_.get(),
+                                            method_inliner_map_.get(),
+                                            compiler_backend, insn_set,
+                                            insn_features, false, NULL, 2, true));
   jobject class_loader = NULL;
   if (compile) {
     base::TimingLogger timings("OatTest::WriteRead", false, false);
