@@ -32,6 +32,7 @@
 #include "base/stringprintf.h"
 #include "base/unix_file/fd_file.h"
 #include "class_linker.h"
+#include "compiler_callbacks.h"
 #include "dex_file-inl.h"
 #include "entrypoints/entrypoint_utils.h"
 #include "gc/heap.h"
@@ -47,6 +48,8 @@
 #include "ScopedLocalRef.h"
 #include "thread.h"
 #include "UniquePtr.h"
+#include "verifier/method_verifier.h"
+#include "verifier/method_verifier-inl.h"
 #include "well_known_classes.h"
 
 namespace art {
@@ -404,8 +407,18 @@ class CommonTest : public testing::Test {
     std::string min_heap_string(StringPrintf("-Xms%zdm", gc::Heap::kDefaultInitialSize / MB));
     std::string max_heap_string(StringPrintf("-Xmx%zdm", gc::Heap::kDefaultMaximumSize / MB));
 
+    // TODO: make selectable
+#if defined(ART_USE_PORTABLE_COMPILER)
+    CompilerBackend compiler_backend = kPortable;
+#else
+    CompilerBackend compiler_backend = kQuick;
+#endif
+
+    verified_methods_data_.reset(new VerifiedMethodsData);
+    method_inliner_map_.reset(compiler_backend == kQuick ? new DexFileToMethodInlinerMap : nullptr);
+    callbacks_.Reset(verified_methods_data_.get(), method_inliner_map_.get());
     Runtime::Options options;
-    options.push_back(std::make_pair("compiler", reinterpret_cast<void*>(NULL)));
+    options.push_back(std::make_pair("compilercallbacks", static_cast<CompilerCallbacks*>(&callbacks_)));
     options.push_back(std::make_pair("bootclasspath", &boot_class_path_));
     options.push_back(std::make_pair("-Xcheck:jni", reinterpret_cast<void*>(NULL)));
     options.push_back(std::make_pair(min_heap_string.c_str(), reinterpret_cast<void*>(NULL)));
@@ -432,16 +445,6 @@ class CommonTest : public testing::Test {
       instruction_set = kX86;
 #endif
 
-      // TODO: make selectable
-#if defined(ART_USE_PORTABLE_COMPILER)
-      CompilerBackend compiler_backend = kPortable;
-#else
-      CompilerBackend compiler_backend = kQuick;
-#endif
-
-      if (!runtime_->HasResolutionMethod()) {
-        runtime_->SetResolutionMethod(runtime_->CreateResolutionMethod());
-      }
       for (int i = 0; i < Runtime::kLastCalleeSaveType; i++) {
         Runtime::CalleeSaveType type = Runtime::CalleeSaveType(i);
         if (!runtime_->HasCalleeSaveMethod(type)) {
@@ -450,8 +453,6 @@ class CommonTest : public testing::Test {
         }
       }
       class_linker_->FixupDexCaches(runtime_->GetResolutionMethod());
-      verified_methods_data_.reset(new VerifiedMethodsData);
-      method_inliner_map_.reset(new DexFileToMethodInlinerMap);
       compiler_driver_.reset(new CompilerDriver(verified_methods_data_.get(),
                                                 method_inliner_map_.get(),
                                                 compiler_backend, instruction_set,
@@ -502,6 +503,9 @@ class CommonTest : public testing::Test {
     (*icu_cleanup_fn)();
 
     compiler_driver_.reset();
+    callbacks_.Reset(nullptr, nullptr);
+    method_inliner_map_.reset();
+    verified_methods_data_.reset();
     STLDeleteElements(&opened_dex_files_);
 
     Runtime::Current()->GetHeap()->VerifyHeap();  // Check for heap corruption after the test
@@ -630,6 +634,36 @@ class CommonTest : public testing::Test {
     image_reservation_.reset();
   }
 
+  class TestCompilerCallbacks : public CompilerCallbacks {
+   public:
+    TestCompilerCallbacks() : verified_methods_data_(nullptr), method_inliner_map_(nullptr) { }
+
+    void Reset(VerifiedMethodsData* verified_methods_data,
+               DexFileToMethodInlinerMap* method_inliner_map) {
+        verified_methods_data_ = verified_methods_data;
+        method_inliner_map_ = method_inliner_map;
+    }
+
+    virtual bool MethodVerified(verifier::MethodVerifier* verifier)
+        SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
+      CHECK(verified_methods_data_);
+      bool result = verified_methods_data_->ProcessVerifiedMethod(verifier);
+      if (result && method_inliner_map_ != nullptr) {
+        MethodReference ref = verifier->GetMethodReference();
+        method_inliner_map_->GetMethodInliner(ref.dex_file)
+            ->AnalyseMethodCode(ref.dex_method_index, verifier->CodeItem());
+      }
+      return result;
+    }
+    virtual void ClassRejected(ClassReference ref) {
+      verified_methods_data_->AddRejectedClass(ref);
+    }
+
+   private:
+    VerifiedMethodsData* verified_methods_data_;
+    DexFileToMethodInlinerMap* method_inliner_map_;
+  };
+
   std::string android_data_;
   std::string dalvik_cache_;
   const DexFile* java_lang_dex_file_;  // owned by runtime_
@@ -640,6 +674,7 @@ class CommonTest : public testing::Test {
   ClassLinker* class_linker_;
   UniquePtr<VerifiedMethodsData> verified_methods_data_;
   UniquePtr<DexFileToMethodInlinerMap> method_inliner_map_;
+  TestCompilerCallbacks callbacks_;
   UniquePtr<CompilerDriver> compiler_driver_;
 
  private:
