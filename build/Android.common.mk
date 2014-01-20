@@ -88,6 +88,9 @@ include $(LLVM_ROOT_PATH)/llvm.mk
 # ART_TARGET_CLANG := true
 # ART_HOST_CLANG := true
 
+# directory used for dalvik-cache on device
+ART_DALVIK_CACHE_DIR := /data/dalvik-cache
+
 # directory used for gtests on device
 ART_NATIVETEST_DIR := /data/nativetest/art
 ART_NATIVETEST_OUT := $(TARGET_OUT_DATA_NATIVE_TESTS)/art
