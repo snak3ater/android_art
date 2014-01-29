@@ -79,38 +79,17 @@ LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
 LOCAL_ADDITIONAL_DEPENDENCIES += art/build/Android.oat.mk
 LOCAL_ADDITIONAL_DEPENDENCIES += $(HOST_CORE_IMG_OUT)
 include $(BUILD_PHONY_PACKAGE)
-endif
+endif # ART_BUILD_HOST
 
-########################################################################
-# The full system boot classpath
-TARGET_BOOT_JARS := $(subst :, ,$(DEXPREOPT_BOOT_JARS))
-TARGET_BOOT_JARS := $(foreach jar,$(TARGET_BOOT_JARS),$(patsubst core, core-libart,$(jar)))
-TARGET_BOOT_DEX_LOCATIONS := $(foreach jar,$(TARGET_BOOT_JARS),/$(DEXPREOPT_BOOT_JAR_DIR)/$(jar).jar)
-TARGET_BOOT_DEX_FILES := $(foreach jar,$(TARGET_BOOT_JARS),$(call intermediates-dir-for,JAVA_LIBRARIES,$(jar),,COMMON)/javalib.jar)
-
-TARGET_BOOT_IMG_OUT := $(DEFAULT_DEX_PREOPT_IMAGE)
-TARGET_BOOT_OAT_OUT := $(patsubst %.art,%.oat,$(TARGET_BOOT_IMG_OUT))
-TARGET_BOOT_OAT := $(subst $(PRODUCT_OUT),,$(TARGET_BOOT_OAT_OUT))
-TARGET_BOOT_OAT_UNSTRIPPED_OUT := $(TARGET_OUT_UNSTRIPPED)$(TARGET_BOOT_OAT)
-
-$(TARGET_BOOT_IMG_OUT): $(TARGET_BOOT_DEX_FILES) $(DEX2OAT_DEPENDENCY)
-	@echo "target dex2oat: $@ ($?)"
-	@mkdir -p $(dir $@)
-	@mkdir -p $(dir $(TARGET_BOOT_OAT_UNSTRIPPED_OUT))
-	$(hide) $(DEX2OAT) $(PARALLEL_ART_COMPILE_JOBS) --runtime-arg -Xms256m --runtime-arg -Xmx256m --image-classes=$(PRELOADED_CLASSES) $(addprefix --dex-file=,$(TARGET_BOOT_DEX_FILES)) $(addprefix --dex-location=,$(TARGET_BOOT_DEX_LOCATIONS)) --oat-symbols=$(TARGET_BOOT_OAT_UNSTRIPPED_OUT) --oat-file=$(TARGET_BOOT_OAT_OUT) --oat-location=$(TARGET_BOOT_OAT) --image=$(TARGET_BOOT_IMG_OUT) --base=$(IMG_TARGET_BASE_ADDRESS) --instruction-set=$(TARGET_ARCH) --host-prefix=$(PRODUCT_OUT) --android-root=$(PRODUCT_OUT)/system
-
-$(TARGET_BOOT_OAT_UNSTRIPPED_OUT): $(TARGET_BOOT_IMG_OUT)
-
-$(TARGET_BOOT_OAT_OUT): $(TARGET_BOOT_OAT_UNSTRIPPED_OUT)
-
-ifeq ($(ART_BUILD_TARGET_NDEBUG),true)
-ifneq ($(PRODUCT_DEX_PREOPT_IMAGE_IN_DATA),true)
+# If we aren't building the host toolchain, skip building the target core.art.
+ifeq ($(WITH_HOST_DALVIK),true)
+ifeq ($(ART_BUILD_TARGET),true)
 include $(CLEAR_VARS)
-LOCAL_MODULE := boot.art
+LOCAL_MODULE := core.art
 LOCAL_MODULE_TAGS := optional
 LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
 LOCAL_ADDITIONAL_DEPENDENCIES += art/build/Android.oat.mk
-LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_BOOT_IMG_OUT) $(TARGET_BOOT_OAT_OUT)
+LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_CORE_IMG_OUT)
 include $(BUILD_PHONY_PACKAGE)
-endif
-endif
+endif # ART_BUILD_TARGET
+endif # WITH_HOST_DALVIK
