@@ -2042,10 +2042,11 @@ mirror::Class* ClassLinker::CreateArrayClass(const char* descriptor,
                                              mirror::ClassLoader* class_loader) {
   // Identify the underlying component type
   CHECK_EQ('[', descriptor[0]);
-  mirror::Class* component_type = FindClass(descriptor + 1, class_loader);
-  if (component_type == NULL) {
-    DCHECK(Thread::Current()->IsExceptionPending());
-    return NULL;
+  Thread* self = Thread::Current();
+  SirtRef<mirror::Class> component_type(self, FindClass(descriptor + 1, class_loader));
+  if (component_type.get() == nullptr) {
+    DCHECK(self->IsExceptionPending());
+    return nullptr;
   }
 
   // See if the component type is already loaded.  Array classes are
@@ -2080,7 +2081,6 @@ mirror::Class* ClassLinker::CreateArrayClass(const char* descriptor,
   //
   // Array classes are simple enough that we don't need to do a full
   // link step.
-  Thread* self = Thread::Current();
   SirtRef<mirror::Class> new_class(self, NULL);
   if (UNLIKELY(!init_done_)) {
     // Classes that were hand created, ie not by FindSystemClass
@@ -2102,12 +2102,12 @@ mirror::Class* ClassLinker::CreateArrayClass(const char* descriptor,
       new_class.reset(GetClassRoot(kIntArrayClass));
     }
   }
-  if (new_class.get() == NULL) {
+  if (new_class.get() == nullptr) {
     new_class.reset(AllocClass(self, sizeof(mirror::Class)));
-    if (new_class.get() == NULL) {
-      return NULL;
+    if (new_class.get() == nullptr) {
+      return nullptr;
     }
-    new_class->SetComponentType(component_type);
+    new_class->SetComponentType(component_type.get());
   }
   ObjectLock lock(self, new_class.get());  // Must hold lock on object when initializing.
   DCHECK(new_class->GetComponentType() != NULL);
@@ -2133,7 +2133,7 @@ mirror::Class* ClassLinker::CreateArrayClass(const char* descriptor,
 
   // Use the single, global copies of "interfaces" and "iftable"
   // (remember not to free them for arrays).
-  CHECK(array_iftable_ != NULL);
+  CHECK(array_iftable_ != nullptr);
   new_class->SetIfTable(array_iftable_);
 
   // Inherit access flags from the component type.
@@ -2148,7 +2148,7 @@ mirror::Class* ClassLinker::CreateArrayClass(const char* descriptor,
   new_class->SetAccessFlags(access_flags);
 
   mirror::Class* existing = InsertClass(descriptor, new_class.get(), Hash(descriptor));
-  if (existing == NULL) {
+  if (existing == nullptr) {
     return new_class.get();
   }
   // Another thread must have loaded the class after we
