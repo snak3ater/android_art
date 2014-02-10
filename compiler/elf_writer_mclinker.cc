@@ -373,7 +373,7 @@ void ElfWriterMclinker::FixupOatMethodOffsets(const std::vector<const DexFile*>&
           (!method->IsStatic() ||
            method->IsConstructor() ||
            method->GetDeclaringClass()->IsInitialized())) {
-        method->SetOatCodeOffset(offset);
+        method->SetPortableOatCodeOffset(offset);
       }
     }
     it.Next();
