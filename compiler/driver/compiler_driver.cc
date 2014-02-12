@@ -901,14 +901,13 @@ static mirror::Class* ComputeCompilingMethodsClass(ScopedObjectAccess& soa,
                                               dex_cache, class_loader);
 }
 
-static mirror::ArtField* ComputeFieldReferencedFromCompilingMethod(ScopedObjectAccess& soa,
-                                                                const DexCompilationUnit* mUnit,
-                                                                uint32_t field_idx)
+static mirror::ArtField* ComputeFieldReferencedFromCompilingMethod(
+    ScopedObjectAccess& soa, const DexCompilationUnit* mUnit, uint32_t field_idx, bool is_static)
     SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
   mirror::DexCache* dex_cache = mUnit->GetClassLinker()->FindDexCache(*mUnit->GetDexFile());
   mirror::ClassLoader* class_loader = soa.Decode<mirror::ClassLoader*>(mUnit->GetClassLoader());
   return mUnit->GetClassLinker()->ResolveField(*mUnit->GetDexFile(), field_idx, dex_cache,
-                                               class_loader, false);
+                                               class_loader, is_static);
 }
 
 static mirror::ArtMethod* ComputeMethodReferencedFromCompilingMethod(ScopedObjectAccess& soa,
@@ -929,7 +928,8 @@ bool CompilerDriver::ComputeInstanceFieldInfo(uint32_t field_idx, const DexCompi
   field_offset = -1;
   is_volatile = true;
   // Try to resolve field and ignore if an Incompatible Class Change Error (ie is static).
-  mirror::ArtField* resolved_field = ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx);
+  mirror::ArtField* resolved_field =
+      ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx, false);
   if (resolved_field != NULL && !resolved_field->IsStatic()) {
     mirror::Class* referrer_class =
         ComputeCompilingMethodsClass(soa, resolved_field->GetDeclaringClass()->GetDexCache(),
@@ -980,7 +980,8 @@ bool CompilerDriver::ComputeStaticFieldInfo(uint32_t field_idx, const DexCompila
   is_referrers_class = false;
   is_volatile = true;
   // Try to resolve field and ignore if an Incompatible Class Change Error (ie isn't static).
-  mirror::ArtField* resolved_field = ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx);
+  mirror::ArtField* resolved_field =
+      ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx, true);
   if (resolved_field != NULL && resolved_field->IsStatic()) {
     mirror::Class* referrer_class =
         ComputeCompilingMethodsClass(soa, resolved_field->GetDeclaringClass()->GetDexCache(),
