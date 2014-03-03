@@ -173,7 +173,7 @@ void ElfWriterMclinker::AddOatInput(std::vector<uint8_t>& oat_contents) {
   mcld::LDSection* null_section = ir_builder_->CreateELFHeader(*oat_input_,
                                                                "",
                                                                mcld::LDFileFormat::Null,
-                                                               llvm::ELF::SHT_NULL,
+                                                               SHT_NULL,
                                                                0);
   CHECK(null_section != NULL);
 
@@ -191,9 +191,8 @@ void ElfWriterMclinker::AddOatInput(std::vector<uint8_t>& oat_contents) {
   // TODO: ownership of text_section?
   mcld::LDSection* text_section = ir_builder_->CreateELFHeader(*oat_input_,
                                                                ".text",
-                                                               llvm::ELF::SHT_PROGBITS,
-                                                               llvm::ELF::SHF_EXECINSTR
-                                                               | llvm::ELF::SHF_ALLOC,
+                                                               SHT_PROGBITS,
+                                                               SHF_EXECINSTR | SHF_ALLOC,
                                                                alignment);
   CHECK(text_section != NULL);
 
@@ -335,7 +334,7 @@ bool ElfWriterMclinker::Link() {
     PLOG(ERROR) << "Failed to dup file descriptor for " << elf_file_->GetPath();
     return false;
   }
-  if (!linker_->emit(fd)) {
+  if (!linker_->emit(*module_.get(), fd)) {
     LOG(ERROR) << "Failed to emit " << elf_file_->GetPath();
     return false;
   }
@@ -349,7 +348,7 @@ void ElfWriterMclinker::FixupOatMethodOffsets(const std::vector<const DexFile*>&
   UniquePtr<ElfFile> elf_file(ElfFile::Open(elf_file_, true, false));
   CHECK(elf_file.get() != NULL) << elf_file_->GetPath();
 
-  llvm::ELF::Elf32_Addr oatdata_address = GetOatDataAddress(elf_file.get());
+  uint32_t oatdata_address = GetOatDataAddress(elf_file.get());
   DexMethodIterator it(dex_files);
   while (it.HasNext()) {
     const DexFile& dex_file = it.GetDexFile();
@@ -382,7 +381,7 @@ void ElfWriterMclinker::FixupOatMethodOffsets(const std::vector<const DexFile*>&
 }
 
 uint32_t ElfWriterMclinker::FixupCompiledCodeOffset(ElfFile& elf_file,
-                                                    llvm::ELF::Elf32_Addr oatdata_address,
+                                                    Elf32_Addr oatdata_address,
                                                     const CompiledCode& compiled_code) {
   const std::string& symbol = compiled_code.GetSymbol();
   SafeMap<const std::string*, uint32_t>::iterator it = symbol_to_compiled_code_offset_.find(&symbol);
@@ -390,9 +389,9 @@ uint32_t ElfWriterMclinker::FixupCompiledCodeOffset(ElfFile& elf_file,
     return it->second;
   }
 
-  llvm::ELF::Elf32_Addr compiled_code_address = elf_file.FindSymbolAddress(llvm::ELF::SHT_SYMTAB,
-                                                                           symbol,
-                                                                           true);
+  Elf32_Addr compiled_code_address = elf_file.FindSymbolAddress(SHT_SYMTAB,
+                                                                symbol,
+                                                                true);
   CHECK_NE(0U, compiled_code_address) << symbol;
   CHECK_LT(oatdata_address, compiled_code_address) << symbol;
   uint32_t compiled_code_offset = compiled_code_address - oatdata_address;
