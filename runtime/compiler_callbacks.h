@@ -14,29 +14,32 @@
  * limitations under the License.
  */
 
-#ifndef ART_RUNTIME_CLASS_REFERENCE_H_
-#define ART_RUNTIME_CLASS_REFERENCE_H_
+#ifndef ART_RUNTIME_COMPILER_CALLBACKS_H_
+#define ART_RUNTIME_COMPILER_CALLBACKS_H_
 
-#include <stdint.h>
-#include <utility>
+#include "class_reference.h"
+#include "locks.h"
 
 namespace art {
 
-class DexFile;
+namespace verifier {
 
-// A class is uniquely located by its DexFile and the class_defs_ table index into that DexFile
-typedef std::pair<const DexFile*, uint32_t> ClassReference;
+class MethodVerifier;
 
-inline bool operator<(const ClassReference& lhs, const ClassReference& rhs) {
-  if (lhs.second < rhs.second) {
-    return true;
-  } else if (lhs.second > rhs.second) {
-    return false;
-  } else {
-    return (lhs.first < rhs.first);
-  }
-}
+}  // namespace verifier
+
+class CompilerCallbacks {
+  public:
+    virtual ~CompilerCallbacks() { }
+
+    virtual bool MethodVerified(verifier::MethodVerifier* verifier)
+        SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) = 0;
+    virtual void ClassRejected(ClassReference ref) = 0;
+
+  protected:
+    CompilerCallbacks() { }
+};
 
 }  // namespace art
 
-#endif  // ART_RUNTIME_CLASS_REFERENCE_H_
+#endif  // ART_RUNTIME_COMPILER_CALLBACKS_H_
