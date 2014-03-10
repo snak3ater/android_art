@@ -161,7 +161,8 @@ TEST(OptimizerTest, CFG5) {
 }
 
 TEST(OptimizerTest, CFG6) {
-  const uint16_t data[] = {
+  const uint16_t data[] = ONE_REGISTER_CODE_ITEM(
+    Instruction::CONST_4 | 0 | 0,
     Instruction::IF_EQ, 3,
     Instruction::GOTO | 0x100,
     Instruction::RETURN_VOID
@@ -179,11 +180,11 @@ TEST(OptimizerTest, CFG6) {
 }
 
 TEST(OptimizerTest, CFG7) {
-  const uint16_t data[] = {
-    Instruction::IF_EQ, 3,  // Block number 1
-    Instruction::GOTO | 0x100,  // Block number 2
-    Instruction::GOTO | 0xFF00  // Block number 3
-  };
+  const uint16_t data[] = ONE_REGISTER_CODE_ITEM(
+    Instruction::CONST_4 | 0 | 0,
+    Instruction::IF_EQ, 3,        // Block number 1
+    Instruction::GOTO | 0x100,    // Block number 2
+    Instruction::GOTO | 0xFF00);  // Block number 3
 
   const int dominators[] = {
     -1,
@@ -197,12 +198,12 @@ TEST(OptimizerTest, CFG7) {
 }
 
 TEST(OptimizerTest, CFG8) {
-  const uint16_t data[] = {
-    Instruction::IF_EQ, 3,  // Block number 1
-    Instruction::GOTO | 0x200,  // Block number 2
-    Instruction::GOTO | 0x100,  // Block number 3
-    Instruction::GOTO | 0xFF00  // Block number 4
-  };
+  const uint16_t data[] = ONE_REGISTER_CODE_ITEM(
+    Instruction::CONST_4 | 0 | 0,
+    Instruction::IF_EQ, 3,        // Block number 1
+    Instruction::GOTO | 0x200,    // Block number 2
+    Instruction::GOTO | 0x100,    // Block number 3
+    Instruction::GOTO | 0xFF00);  // Block number 4
 
   const int dominators[] = {
     -1,
@@ -217,12 +218,12 @@ TEST(OptimizerTest, CFG8) {
 }
 
 TEST(OptimizerTest, CFG9) {
-  const uint16_t data[] = {
-    Instruction::IF_EQ, 3,  // Block number 1
-    Instruction::GOTO | 0x200,  // Block number 2
-    Instruction::GOTO | 0x100,  // Block number 3
-    Instruction::GOTO | 0xFE00  // Block number 4
-  };
+  const uint16_t data[] = ONE_REGISTER_CODE_ITEM(
+    Instruction::CONST_4 | 0 | 0,
+    Instruction::IF_EQ, 3,        // Block number 1
+    Instruction::GOTO | 0x200,    // Block number 2
+    Instruction::GOTO | 0x100,    // Block number 3
+    Instruction::GOTO | 0xFE00);  // Block number 4
 
   const int dominators[] = {
     -1,
@@ -237,7 +238,8 @@ TEST(OptimizerTest, CFG9) {
 }
 
 TEST(OptimizerTest, CFG10) {
-  const uint16_t data[] = {
+  const uint16_t data[] = ONE_REGISTER_CODE_ITEM(
+    Instruction::CONST_4 | 0 | 0,
     Instruction::IF_EQ, 6,  // Block number 1
     Instruction::IF_EQ, 3,  // Block number 2
     Instruction::GOTO | 0x100,  // Block number 3
