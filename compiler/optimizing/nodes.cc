@@ -122,6 +122,10 @@ void HGraph::VisitBlockForDominatorTree(HBasicBlock* block,
 }
 
 void HBasicBlock::AddInstruction(HInstruction* instruction) {
+  DCHECK(instruction->GetBlock() == nullptr);
+  DCHECK_EQ(instruction->GetId(), -1);
+  instruction->SetBlock(this);
+  instruction->SetId(GetGraph()->GetNextInstructionId());
   if (first_instruction_ == nullptr) {
     DCHECK(last_instruction_ == nullptr);
     first_instruction_ = last_instruction_ = instruction;
