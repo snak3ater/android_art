@@ -166,6 +166,11 @@ class HBasicBlock : public ArenaObject {
   M(Exit)                                                  \
   M(Goto)                                                  \
   M(If)                                                    \
+  M(IntConstant)                                           \
+  M(InvokeStatic)                                          \
+  M(LoadLocal)                                             \
+  M(Local)                                                 \
+  M(Return)                                                \
   M(ReturnVoid)                                            \
 
 #define DECLARE_INSTRUCTION(type)                          \
@@ -321,6 +326,120 @@ class HIf : public HTemplateInstruction<0> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HIf);
+};
+
+// Instruction to check if two inputs are equal to each other.
+class HEqual : public HTemplateInstruction<2> {
+ public:
+  HEqual(HInstruction* first, HInstruction* second) {
+    SetRawInputAt(0, first);
+    SetRawInputAt(1, second);
+  }
+
+  DECLARE_INSTRUCTION(Equal)
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HEqual);
+};
+
+// A local in the graph. Corresponds to a Dex register.
+class HLocal : public HTemplateInstruction<0> {
+ public:
+  explicit HLocal(uint16_t reg_number) : reg_number_(reg_number) { }
+
+  DECLARE_INSTRUCTION(Local)
+
+  uint16_t GetRegNumber() const { return reg_number_; }
+
+ private:
+  // The Dex register number.
+  const uint16_t reg_number_;
+
+  DISALLOW_COPY_AND_ASSIGN(HLocal);
+};
+
+// Load a given local. The local is an input of this instruction.
+class HLoadLocal : public HTemplateInstruction<1> {
+ public:
+  explicit HLoadLocal(HLocal* local) {
+    SetRawInputAt(0, local);
+  }
+
+  HLocal* GetLocal() const { return reinterpret_cast<HLocal*>(InputAt(0)); }
+
+  DECLARE_INSTRUCTION(LoadLocal)
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HLoadLocal);
+};
+
+// Store a value in a given local. This instruction has two inputs: the value
+// and the local.
+class HStoreLocal : public HTemplateInstruction<2> {
+ public:
+  HStoreLocal(HLocal* local, HInstruction* value) {
+    SetRawInputAt(0, local);
+    SetRawInputAt(1, value);
+  }
+
+  HLocal* GetLocal() const { return reinterpret_cast<HLocal*>(InputAt(0)); }
+
+  DECLARE_INSTRUCTION(StoreLocal)
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HStoreLocal);
+};
+
+// Constants of the type int. Those can be from Dex instructions, or
+// synthesized (for example with the if-eqz instruction).
+class HIntConstant : public HTemplateInstruction<0> {
+ public:
+  explicit HIntConstant(int32_t value) : value_(value) { }
+
+  int32_t GetValue() const { return value_; }
+
+  DECLARE_INSTRUCTION(IntConstant)
+
+ private:
+  const int32_t value_;
+
+  DISALLOW_COPY_AND_ASSIGN(HIntConstant);
+};
+
+class HInvoke : public HInstruction {
+ public:
+  HInvoke(ArenaAllocator* arena, uint32_t number_of_arguments, int32_t dex_pc)
+    : inputs_(arena, number_of_arguments),
+      dex_pc_(dex_pc) {
+    inputs_.SetSize(number_of_arguments);
+  }
+
+  virtual intptr_t InputCount() const { return inputs_.Size(); }
+  virtual HInstruction* InputAt(intptr_t i) const { return inputs_.Get(i); }
+
+  int32_t GetDexPc() const { return dex_pc_; }
+
+ protected:
+  GrowableArray<HInstruction*> inputs_;
+  const int32_t dex_pc_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HInvoke);
+};
+
+class HInvokeStatic : public HInvoke {
+ public:
+  HInvokeStatic(ArenaAllocator* arena, uint32_t number_of_arguments, int32_t dex_pc, int32_t index_in_dex_cache)
+      : HInvoke(arena, number_of_arguments, dex_pc), index_in_dex_cache_(index_in_dex_cache) { }
+
+  uint32_t GetIndexInDexCache() const { return index_in_dex_cache_; }
+
+  DECLARE_INSTRUCTION(InvokeStatic)
+
+ private:
+  uint32_t index_in_dex_cache_;
+
+  DISALLOW_COPY_AND_ASSIGN(HInvokeStatic);
 };
 
 class HGraphVisitor : public ValueObject {

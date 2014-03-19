@@ -17,6 +17,8 @@
 #ifndef ART_COMPILER_OPTIMIZING_BUILDER_H_
 #define ART_COMPILER_OPTIMIZING_BUILDER_H_
 
+#include "dex_file.h"
+#include "driver/dex_compilation_unit.h"
 #include "utils/allocation.h"
 #include "utils/growable_array.h"
 
@@ -29,13 +31,19 @@ class HGraph;
 
 class HGraphBuilder : public ValueObject {
  public:
-  explicit HGraphBuilder(ArenaAllocator* arena)
+  HGraphBuilder(ArenaAllocator* arena,
+                const DexCompilationUnit* dex_compilation_unit = nullptr,
+                const DexFile* dex_file = nullptr)
       : arena_(arena),
         branch_targets_(arena, 0),
         entry_block_(nullptr),
         exit_block_(nullptr),
         current_block_(nullptr),
-        graph_(nullptr) { }
+        graph_(nullptr),
+        constant0_(nullptr),
+        constant1_(nullptr),
+        dex_file_(dex_file),
+        dex_compilation_unit_(dex_compilation_unit) { }
 
   HGraph* BuildGraph(const uint16_t* start, const uint16_t* end);
 
@@ -62,6 +70,12 @@ class HGraphBuilder : public ValueObject {
   HBasicBlock* exit_block_;
   HBasicBlock* current_block_;
   HGraph* graph_;
+
+  HIntConstant* constant0_;
+  HIntConstant* constant1_;
+
+  const DexFile* const dex_file_;
+  const DexCompilationUnit* const dex_compilation_unit_;
 
   DISALLOW_COPY_AND_ASSIGN(HGraphBuilder);
 };
