@@ -191,6 +191,38 @@ bool ParsedOptions::Parse(const Runtime::Options& options, bool ignore_unrecogni
   profile_backoff_coefficient_ = 2.0;
   profile_clock_source_ = kDefaultProfilerClockSource;
 
+  // Default to explicit checks.  Switch off with -implicit-checks:.
+  // or setprop dalvik.vm.implicit_checks check1,check2,...
+#ifdef HAVE_ANDROID_OS
+  {
+    char buf[PROP_VALUE_MAX];
+    property_get("dalvik.vm.implicit_checks", buf, "none");
+    std::string checks(buf);
+    std::vector<std::string> checkvec;
+    Split(checks, ',', checkvec);
+    explicit_checks_ = kExplicitNullCheck | kExplicitSuspendCheck |
+        kExplicitStackOverflowCheck;
+    for (auto& str : checkvec) {
+      std::string val = Trim(str);
+      if (val == "none") {
+        explicit_checks_ = kExplicitNullCheck | kExplicitSuspendCheck |
+          kExplicitStackOverflowCheck;
+      } else if (val == "null") {
+        explicit_checks_ &= ~kExplicitNullCheck;
+      } else if (val == "suspend") {
+        explicit_checks_ &= ~kExplicitSuspendCheck;
+      } else if (val == "stack") {
+        explicit_checks_ &= ~kExplicitStackOverflowCheck;
+      } else if (val == "all") {
+        explicit_checks_ = 0;
+      }
+    }
+  }
+#else
+  explicit_checks_ = kExplicitNullCheck | kExplicitSuspendCheck |
+    kExplicitStackOverflowCheck;
+#endif
+
   for (size_t i = 0; i < options.size(); ++i) {
     if (true && options[0].first == "-Xzygote") {
       LOG(INFO) << "option[" << i << "]=" << options[i].first;
