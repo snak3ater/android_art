@@ -137,9 +137,7 @@ String* String::AllocFromUtf16(Thread* self,
 }
 
 String* String::AllocFromModifiedUtf8(Thread* self, const char* utf) {
-  if (utf == NULL) {
-    return NULL;
-  }
+  DCHECK(utf != nullptr);
   size_t char_count = CountModifiedUtf8Chars(utf);
   return AllocFromModifiedUtf8(self, char_count, utf);
 }
