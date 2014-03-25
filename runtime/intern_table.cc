@@ -185,15 +185,15 @@ mirror::String* InternTable::Insert(mirror::String* s, bool is_strong) {
   return Insert(weak_interns_, s, hash_code);
 }
 
-mirror::String* InternTable::InternStrong(int32_t utf16_length, const char* utf8_data) {
-  DCHECK(utf8_data != nullptr);
+mirror::String* InternTable::InternStrong(int32_t utf16_length,
+                                          const char* utf8_data) {
   return InternStrong(mirror::String::AllocFromModifiedUtf8(
       Thread::Current(), utf16_length, utf8_data));
 }
 
 mirror::String* InternTable::InternStrong(const char* utf8_data) {
-  DCHECK(utf8_data != nullptr);
-  return InternStrong(mirror::String::AllocFromModifiedUtf8(Thread::Current(), utf8_data));
+  return InternStrong(
+      mirror::String::AllocFromModifiedUtf8(Thread::Current(), utf8_data));
 }
 
 mirror::String* InternTable::InternStrong(mirror::String* s) {
