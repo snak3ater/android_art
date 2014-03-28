@@ -3464,8 +3464,6 @@ void Dbg::DdmSendHeapSegments(bool native) {
   } else {
     gc::Heap* heap = Runtime::Current()->GetHeap();
     const std::vector<gc::space::ContinuousSpace*>& spaces = heap->GetContinuousSpaces();
-    Thread* self = Thread::Current();
-    ReaderMutexLock mu(self, *Locks::heap_bitmap_lock_);
     typedef std::vector<gc::space::ContinuousSpace*>::const_iterator It;
     for (It cur = spaces.begin(), end = spaces.end(); cur != end; ++cur) {
       if ((*cur)->IsDlMallocSpace()) {
