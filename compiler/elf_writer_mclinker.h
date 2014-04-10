@@ -29,6 +29,7 @@ class LDSection;
 class LDSymbol;
 class Linker;
 class LinkerConfig;
+class LinkerScript;
 class Module;
 }  // namespace mcld
 
@@ -68,12 +69,13 @@ class ElfWriterMclinker : public ElfWriter {
   void FixupOatMethodOffsets(const std::vector<const DexFile*>& dex_files)
       SHARED_LOCKS_REQUIRED(Locks::mutator_lock_);
   uint32_t FixupCompiledCodeOffset(ElfFile& elf_file,
-                                   llvm::ELF::Elf32_Addr oatdata_address,
+                                   ::llvm::ELF::Elf32_Addr oatdata_address,
                                    const CompiledCode& compiled_code);
 #endif
 
   // Setup by Init()
   UniquePtr<mcld::LinkerConfig> linker_config_;
+  UniquePtr<mcld::LinkerScript> linker_script_;
   UniquePtr<mcld::Module> module_;
   UniquePtr<mcld::IRBuilder> ir_builder_;
   UniquePtr<mcld::Linker> linker_;

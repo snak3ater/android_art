@@ -74,7 +74,7 @@ define build-art-test-dex
     LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
     LOCAL_ADDITIONAL_DEPENDENCIES += $(LOCAL_PATH)/Android.mk
     include $(BUILD_JAVA_LIBRARY)
-    ART_TEST_TARGET_DEX_FILES += $(3)/$$(LOCAL_MODULE).jar
+    ART_TEST_TARGET_DEX_FILES += $$(LOCAL_INSTALLED_MODULE)
   endif
 
   ifeq ($(ART_BUILD_HOST),true)
@@ -84,11 +84,11 @@ define build-art-test-dex
     LOCAL_JAVA_LIBRARIES := $(HOST_CORE_JARS)
     LOCAL_NO_STANDARD_LIBRARIES := true
     LOCAL_DEX_PREOPT_IMAGE := $(HOST_CORE_IMG_OUT)
-    LOCAL_BUILD_HOST_DEX := true
+    LOCAL_DEX_PREOPT := false
     LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
     LOCAL_ADDITIONAL_DEPENDENCIES += $(LOCAL_PATH)/Android.mk
-    include $(BUILD_HOST_JAVA_LIBRARY)
-    ART_TEST_HOST_DEX_FILES += $$(LOCAL_MODULE_PATH)/$$(LOCAL_MODULE).jar
+    include $(BUILD_HOST_DALVIK_JAVA_LIBRARY)
+    ART_TEST_HOST_DEX_FILES += $$(LOCAL_INSTALLED_MODULE)
   endif
 endef
 $(foreach dir,$(TEST_DEX_DIRECTORIES), $(eval $(call build-art-test-dex,art-test-dex,$(dir),$(ART_NATIVETEST_OUT))))
@@ -111,8 +111,8 @@ test-art-target-oat-$(1): $(ART_TEST_OUT)/oat-test-dex-$(1).jar test-art-target-
 	$(hide) (adb pull $(ART_TEST_DIR)/test-art-target-oat-$(1) /tmp/ && echo test-art-target-oat-$(1) PASSED) || (echo test-art-target-oat-$(1) FAILED && exit 1)
 	$(hide) rm /tmp/test-art-target-oat-$(1)
 
-$(HOST_OUT_JAVA_LIBRARIES)/oat-test-dex-$(1).odex: $(HOST_OUT_JAVA_LIBRARIES)/oat-test-dex-$(1).jar $(HOST_CORE_IMG_OUT) | $(DEX2OAT)
-	$(DEX2OAT) --runtime-arg -Xms16m --runtime-arg -Xmx16m --boot-image=$(HOST_CORE_IMG_OUT) --dex-file=$(PWD)/$$< --oat-file=$(PWD)/$$@ --instruction-set=$(HOST_ARCH) --host --host-prefix="" --android-root=$(HOST_OUT)
+$(HOST_OUT_JAVA_LIBRARIES)/oat-test-dex-$(1).odex: $(HOST_OUT_JAVA_LIBRARIES)/oat-test-dex-$(1).jar $(HOST_CORE_IMG_OUT) | $(DEX2OATD)
+	$(DEX2OATD) $(DEX2OAT_FLAGS) --runtime-arg -Xms16m --runtime-arg -Xmx16m --boot-image=$(HOST_CORE_IMG_OUT) --dex-file=$(PWD)/$$< --oat-file=$(PWD)/$$@ --instruction-set=$(ART_HOST_ARCH) --host --android-root=$(HOST_OUT)
 
 .PHONY: test-art-host-oat-default-$(1)
 test-art-host-oat-default-$(1): $(HOST_OUT_JAVA_LIBRARIES)/oat-test-dex-$(1).odex test-art-host-dependencies
@@ -166,7 +166,15 @@ dmart_target :=
 endef
 
 # Expand all tests.
-$(foreach test, $(wildcard $(LOCAL_PATH)/[0-9]*), $(eval $(call declare-make-art-run-test,$(notdir $(test)))))
+TEST_ART_RUN_TESTS := $(wildcard $(LOCAL_PATH)/[0-9]*)
+TEST_ART_RUN_TESTS := $(subst $(LOCAL_PATH)/,, $(TEST_ART_RUN_TESTS))
+TEST_ART_TIMING_SENSITIVE_RUN_TESTS := 055-enum-performance
+ifdef dist_goal # disable timing sensitive tests on "dist" builds.
+  $(foreach test, $(TEST_ART_TIMING_SENSITIVE_RUN_TESTS), \
+    $(info Skipping $(test)) \
+    $(eval TEST_ART_RUN_TESTS := $(filter-out $(test), $(TEST_ART_RUN_TESTS))))
+endif
+$(foreach test, $(TEST_ART_RUN_TESTS), $(eval $(call declare-make-art-run-test,$(test))))
 
 include $(CLEAR_VARS)
 LOCAL_MODULE_TAGS := tests

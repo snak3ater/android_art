@@ -1550,6 +1550,9 @@ void ArmAssembler::LoadRef(ManagedRegister mdest, ManagedRegister base,
   CHECK(dst.IsCoreRegister() && dst.IsCoreRegister()) << dst;
   LoadFromOffset(kLoadWord, dst.AsCoreRegister(),
                  base.AsArm().AsCoreRegister(), offs.Int32Value());
+  if (kPoisonHeapReferences) {
+    rsb(dst.AsCoreRegister(), dst.AsCoreRegister(), ShifterOperand(0));
+  }
 }
 
 void ArmAssembler::LoadRef(ManagedRegister mdest, FrameOffset  src) {
@@ -1742,17 +1745,8 @@ void ArmAssembler::Copy(FrameOffset /*dst*/, Offset /*dest_offset*/, FrameOffset
 void ArmAssembler::MemoryBarrier(ManagedRegister mscratch) {
   CHECK_EQ(mscratch.AsArm().AsCoreRegister(), R12);
 #if ANDROID_SMP != 0
-#if defined(__ARM_HAVE_DMB)
   int32_t encoding = 0xf57ff05f;  // dmb
   Emit(encoding);
-#elif  defined(__ARM_HAVE_LDREX_STREX)
-  LoadImmediate(R12, 0);
-  int32_t encoding = 0xee07cfba;  // mcr p15, 0, r12, c7, c10, 5
-  Emit(encoding);
-#else
-  LoadImmediate(R12, 0xffff0fa0);  // kuser_memory_barrier
-  blx(R12);
-#endif
 #endif
 }
 

@@ -73,10 +73,11 @@ void Mir2Lir::CallRuntimeHelperReg(ThreadOffset helper_offset, int arg0, bool sa
 void Mir2Lir::CallRuntimeHelperRegLocation(ThreadOffset helper_offset, RegLocation arg0,
                                            bool safepoint_pc) {
   int r_tgt = CallHelperSetup(helper_offset);
-  if (arg0.wide == 0) {
-    LoadValueDirectFixed(arg0, TargetReg(kArg0));
+  if (arg0.wide) {
+    LoadValueDirectWideFixed(arg0, arg0.fp ? TargetReg(kFArg0) : TargetReg(kArg0),
+        arg0.fp ? TargetReg(kFArg1) : TargetReg(kArg1));
   } else {
-    LoadValueDirectWideFixed(arg0, TargetReg(kArg0), TargetReg(kArg1));
+    LoadValueDirectFixed(arg0, arg0.fp ? TargetReg(kFArg0) : TargetReg(kArg0));
   }
   ClobberCalleeSave();
   CallHelper(r_tgt, helper_offset, safepoint_pc);
@@ -688,7 +689,6 @@ int Mir2Lir::GenDalvikArgsNoRange(CallInfo* info,
                                     vtable_idx, direct_code, direct_method, type);
       }
       StoreBaseDisp(TargetReg(kSp), (next_use + 1) * 4, reg, kWord);
-      StoreBaseDisp(TargetReg(kSp), 16 /* (3+1)*4 */, reg, kWord);
       call_state = next_call_insn(cu_, info, call_state, target_method, vtable_idx,
                                   direct_code, direct_method, type);
       next_use++;
@@ -1020,6 +1020,43 @@ bool Mir2Lir::GenInlinedAbsLong(CallInfo* info) {
   }
 }
 
+bool Mir2Lir::GenInlinedAbsFloat(CallInfo* info) {
+  if (cu_->instruction_set == kMips) {
+    // TODO - add Mips implementation
+    return false;
+  }
+  RegLocation rl_src = info->args[0];
+  rl_src = LoadValue(rl_src, kCoreReg);
+  RegLocation rl_dest = InlineTarget(info);
+  RegLocation rl_result = EvalLoc(rl_dest, kCoreReg, true);
+  int signMask = AllocTemp();
+  LoadConstant(signMask, 0x7fffffff);
+  OpRegRegReg(kOpAnd, rl_result.low_reg, rl_src.low_reg, signMask);
+  FreeTemp(signMask);
+  StoreValue(rl_dest, rl_result);
+  return true;
+}
+
+bool Mir2Lir::GenInlinedAbsDouble(CallInfo* info) {
+  if (cu_->instruction_set == kMips) {
+    // TODO - add Mips implementation
+    return false;
+  }
+  RegLocation rl_src = info->args[0];
+  rl_src = LoadValueWide(rl_src, kCoreReg);
+  RegLocation rl_dest = InlineTargetWide(info);
+  RegLocation rl_result = EvalLoc(rl_dest, kCoreReg, true);
+  OpRegCopyWide(rl_result.low_reg, rl_result.high_reg, rl_src.low_reg, rl_src.high_reg);
+  FreeTemp(rl_src.low_reg);
+  FreeTemp(rl_src.high_reg);
+  int signMask = AllocTemp();
+  LoadConstant(signMask, 0x7fffffff);
+  OpRegReg(kOpAnd, rl_result.high_reg, signMask);
+  FreeTemp(signMask);
+  StoreValueWide(rl_dest, rl_result);
+  return true;
+}
+
 bool Mir2Lir::GenInlinedFloatCvt(CallInfo* info) {
   if (cu_->instruction_set == kMips) {
     // TODO - add Mips implementation
@@ -1231,7 +1268,7 @@ bool Mir2Lir::GenIntrinsic(CallInfo* info) {
     }
   } else if (tgt_methods_declaring_class.starts_with("Ljava/lang/Float;")) {
     std::string tgt_method(PrettyMethod(info->index, *cu_->dex_file));
-    if (tgt_method == "int java.lang.Float.float_to_raw_int_bits(float)") {
+    if (tgt_method == "int java.lang.Float.floatToRawIntBits(float)") {
       return GenInlinedFloatCvt(info);
     }
     if (tgt_method == "float java.lang.Float.intBitsToFloat(int)") {
@@ -1284,6 +1321,32 @@ bool Mir2Lir::GenIntrinsic(CallInfo* info) {
     std::string tgt_method(PrettyMethod(info->index, *cu_->dex_file));
     if (tgt_method == "java.lang.Thread java.lang.Thread.currentThread()") {
       return GenInlinedCurrentThread(info);
+    }
+  } else if (tgt_methods_declaring_class.starts_with("Llibcore/io/Memory;")) {
+    std::string tgt_method(PrettyMethod(info->index, *cu_->dex_file));
+    if (tgt_method == "byte libcore.io.Memory.peekByte(long)") {
+      return GenInlinedPeek(info, kSignedByte);
+    }
+    if (tgt_method == "int libcore.io.Memory.peekIntNative(long)") {
+      return GenInlinedPeek(info, kWord);
+    }
+    if (tgt_method == "long libcore.io.Memory.peekLongNative(long)") {
+      return GenInlinedPeek(info, kLong);
+    }
+    if (tgt_method == "short libcore.io.Memory.peekShortNative(long)") {
+      return GenInlinedPeek(info, kSignedHalf);
+    }
+    if (tgt_method == "void libcore.io.Memory.pokeByte(long, byte)") {
+      return GenInlinedPoke(info, kSignedByte);
+    }
+    if (tgt_method == "void libcore.io.Memory.pokeIntNative(long, int)") {
+      return GenInlinedPoke(info, kWord);
+    }
+    if (tgt_method == "void libcore.io.Memory.pokeLongNative(long, long)") {
+      return GenInlinedPoke(info, kLong);
+    }
+    if (tgt_method == "void libcore.io.Memory.pokeShortNative(long, short)") {
+      return GenInlinedPoke(info, kSignedHalf);
     }
   } else if (tgt_methods_declaring_class.starts_with("Lsun/misc/Unsafe;")) {
     std::string tgt_method(PrettyMethod(info->index, *cu_->dex_file));

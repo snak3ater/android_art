@@ -360,7 +360,7 @@ int Mir2Lir::AllocTempDouble() {
 int Mir2Lir::AllocFreeTemp() {
   return AllocTempBody(reg_pool_->core_regs,
              reg_pool_->num_core_regs,
-             &reg_pool_->next_core_reg, true);
+             &reg_pool_->next_core_reg, false);
 }
 
 int Mir2Lir::AllocTemp() {
@@ -705,11 +705,15 @@ void Mir2Lir::MarkInUse(int reg) {
 void Mir2Lir::CopyRegInfo(int new_reg, int old_reg) {
   RegisterInfo* new_info = GetRegInfo(new_reg);
   RegisterInfo* old_info = GetRegInfo(old_reg);
-  // Target temp status must not change
+  // Target temp, live, dirty status must not change
   bool is_temp = new_info->is_temp;
+  bool live = new_info->live;
+  bool dirty = new_info->dirty;
   *new_info = *old_info;
-  // Restore target's temp status
+  // Restore target's temp, live, dirty status
   new_info->is_temp = is_temp;
+  new_info->live = live;
+  new_info->dirty = dirty;
   new_info->reg = new_reg;
 }
 

@@ -57,17 +57,37 @@ TARGET_CORE_OAT_OUT := $(ART_TEST_OUT)/core.oat
 HOST_CORE_IMG_OUT := $(HOST_OUT_JAVA_LIBRARIES)/core.art
 TARGET_CORE_IMG_OUT := $(ART_TEST_OUT)/core.art
 
-$(HOST_CORE_IMG_OUT): $(HOST_CORE_DEX_FILES) $(DEX2OAT_DEPENDENCY)
+# Use dex2oat debug version for better error reporting
+$(HOST_CORE_IMG_OUT): $(HOST_CORE_DEX_FILES) $(DEX2OATD_DEPENDENCY)
 	@echo "host dex2oat: $@ ($?)"
 	@mkdir -p $(dir $@)
-	$(hide) $(DEX2OAT) $(PARALLEL_ART_COMPILE_JOBS) --runtime-arg -Xms16m --runtime-arg -Xmx16m --image-classes=$(PRELOADED_CLASSES) $(addprefix --dex-file=,$(HOST_CORE_DEX_FILES)) $(addprefix --dex-location=,$(HOST_CORE_DEX_LOCATIONS)) --oat-file=$(HOST_CORE_OAT_OUT) --oat-location=$(HOST_CORE_OAT) --image=$(HOST_CORE_IMG_OUT) --base=$(IMG_HOST_BASE_ADDRESS) --instruction-set=$(HOST_ARCH) --host --android-root=$(HOST_OUT)
+	$(hide) $(DEX2OATD) --runtime-arg -Xms16m --runtime-arg -Xmx16m --image-classes=$(PRELOADED_CLASSES) $(addprefix \
+		--dex-file=,$(HOST_CORE_DEX_FILES)) $(addprefix --dex-location=,$(HOST_CORE_DEX_LOCATIONS)) --oat-file=$(HOST_CORE_OAT_OUT) \
+		--oat-location=$(HOST_CORE_OAT) --image=$(HOST_CORE_IMG_OUT) --base=$(LIBART_IMG_HOST_BASE_ADDRESS) \
+		--instruction-set=$(ART_HOST_ARCH) --host --android-root=$(HOST_OUT)
 
+$(HOST_CORE_OAT_OUT): $(HOST_CORE_IMG_OUT)
 $(TARGET_CORE_IMG_OUT): $(TARGET_CORE_DEX_FILES) $(DEX2OAT_DEPENDENCY)
 	@echo "target dex2oat: $@ ($?)"
 	@mkdir -p $(dir $@)
 	$(hide) $(DEX2OAT) $(PARALLEL_ART_COMPILE_JOBS) --runtime-arg -Xms16m --runtime-arg -Xmx16m --image-classes=$(PRELOADED_CLASSES) $(addprefix --dex-file=,$(TARGET_CORE_DEX_FILES)) $(addprefix --dex-location=,$(TARGET_CORE_DEX_LOCATIONS)) --oat-file=$(TARGET_CORE_OAT_OUT) --oat-location=$(TARGET_CORE_OAT) --image=$(TARGET_CORE_IMG_OUT) --base=$(IMG_TARGET_BASE_ADDRESS) --instruction-set=$(TARGET_ARCH) --host-prefix=$(PRODUCT_OUT) --android-root=$(PRODUCT_OUT)/system
 
-$(HOST_CORE_OAT_OUT): $(HOST_CORE_IMG_OUT)
+define create-oat-target-targets
+$$($(1)TARGET_CORE_IMG_OUT): $$($(1)TARGET_CORE_DEX_FILES) $$(DEX2OATD_DEPENDENCY)
+	@echo "target dex2oat: $$@ ($$?)"
+	@mkdir -p $$(dir $$@)
+	$$(hide) $$(DEX2OATD) --runtime-arg -Xms16m --runtime-arg -Xmx16m --image-classes=$$(PRELOADED_CLASSES) $$(addprefix \
+		--dex-file=,$$(TARGET_CORE_DEX_FILES)) $$(addprefix --dex-location=,$$(TARGET_CORE_DEX_LOCATIONS)) --oat-file=$$($(1)TARGET_CORE_OAT_OUT) \
+		--oat-location=$$($(1)TARGET_CORE_OAT) --image=$$($(1)TARGET_CORE_IMG_OUT) --base=$$(LIBART_IMG_TARGET_BASE_ADDRESS) \
+		--instruction-set=$$($(1)TARGET_ARCH) --instruction-set-features=$$(TARGET_INSTRUCTION_SET_FEATURES) --android-root=$$(PRODUCT_OUT)/system
+
+$$($(1)TARGET_CORE_OAT_OUT): $$($(1)TARGET_CORE_IMG_OUT)
+endef
+
+ifdef TARGET_2ND_ARCH
+$(eval $(call create-oat-target-targets,2ND_))
+endif
+$(eval $(call create-oat-target-targets,))
 
 $(TARGET_CORE_OAT_OUT): $(TARGET_CORE_IMG_OUT)
 
@@ -79,36 +99,17 @@ LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
 LOCAL_ADDITIONAL_DEPENDENCIES += art/build/Android.oat.mk
 LOCAL_ADDITIONAL_DEPENDENCIES += $(HOST_CORE_IMG_OUT)
 include $(BUILD_PHONY_PACKAGE)
-endif
+endif # ART_BUILD_HOST
 
-########################################################################
-# The full system boot classpath
-TARGET_BOOT_JARS := $(subst :, ,$(DEXPREOPT_BOOT_JARS))
-TARGET_BOOT_JARS := $(foreach jar,$(TARGET_BOOT_JARS),$(patsubst core, core-libart,$(jar)))
-TARGET_BOOT_DEX_LOCATIONS := $(foreach jar,$(TARGET_BOOT_JARS),/$(DEXPREOPT_BOOT_JAR_DIR)/$(jar).jar)
-TARGET_BOOT_DEX_FILES := $(foreach jar,$(TARGET_BOOT_JARS),$(call intermediates-dir-for,JAVA_LIBRARIES,$(jar),,COMMON)/javalib.jar)
-
-TARGET_BOOT_IMG_OUT := $(DEFAULT_DEX_PREOPT_IMAGE)
-TARGET_BOOT_OAT_OUT := $(patsubst %.art,%.oat,$(TARGET_BOOT_IMG_OUT))
-TARGET_BOOT_OAT := $(subst $(PRODUCT_OUT),,$(TARGET_BOOT_OAT_OUT))
-TARGET_BOOT_OAT_UNSTRIPPED_OUT := $(TARGET_OUT_UNSTRIPPED)$(TARGET_BOOT_OAT)
-
-$(TARGET_BOOT_IMG_OUT): $(TARGET_BOOT_DEX_FILES) $(DEX2OAT_DEPENDENCY)
-	@echo "target dex2oat: $@ ($?)"
-	@mkdir -p $(dir $@)
-	@mkdir -p $(dir $(TARGET_BOOT_OAT_UNSTRIPPED_OUT))
-	$(hide) $(DEX2OAT) $(PARALLEL_ART_COMPILE_JOBS) --runtime-arg -Xms256m --runtime-arg -Xmx256m --image-classes=$(PRELOADED_CLASSES) $(addprefix --dex-file=,$(TARGET_BOOT_DEX_FILES)) $(addprefix --dex-location=,$(TARGET_BOOT_DEX_LOCATIONS)) --oat-symbols=$(TARGET_BOOT_OAT_UNSTRIPPED_OUT) --oat-file=$(TARGET_BOOT_OAT_OUT) --oat-location=$(TARGET_BOOT_OAT) --image=$(TARGET_BOOT_IMG_OUT) --base=$(IMG_TARGET_BASE_ADDRESS) --instruction-set=$(TARGET_ARCH) --host-prefix=$(PRODUCT_OUT) --android-root=$(PRODUCT_OUT)/system
-
-$(TARGET_BOOT_OAT_UNSTRIPPED_OUT): $(TARGET_BOOT_IMG_OUT)
-
-$(TARGET_BOOT_OAT_OUT): $(TARGET_BOOT_OAT_UNSTRIPPED_OUT)
-
-ifeq ($(ART_BUILD_TARGET_NDEBUG),true)
+# If we aren't building the host toolchain, skip building the target core.art.
+ifeq ($(WITH_HOST_DALVIK),true)
+ifeq ($(ART_BUILD_TARGET),true)
 include $(CLEAR_VARS)
-LOCAL_MODULE := boot.art
+LOCAL_MODULE := core.art
 LOCAL_MODULE_TAGS := optional
 LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
 LOCAL_ADDITIONAL_DEPENDENCIES += art/build/Android.oat.mk
-LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_BOOT_IMG_OUT) $(TARGET_BOOT_OAT_OUT)
+LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_CORE_IMG_OUT)
 include $(BUILD_PHONY_PACKAGE)
-endif
+endif # ART_BUILD_TARGET
+endif # WITH_HOST_DALVIK

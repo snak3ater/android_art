@@ -207,8 +207,9 @@ LIBART_TARGET_SRC_FILES += \
 else # TARGET_ARCH != mips
 $(error unsupported TARGET_ARCH=$(TARGET_ARCH))
 endif # TARGET_ARCH != mips
+endif # TARGET_ARCH != x86_64
 endif # TARGET_ARCH != x86
-endif # TARGET_ARCH != arm
+ # TARGET_ARCH != arm
 
 
 LIBART_HOST_SRC_FILES := \

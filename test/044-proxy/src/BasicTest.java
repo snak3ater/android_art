@@ -88,6 +88,7 @@ public class BasicTest {
         Annotation[][] paramAnnos = meth.getParameterAnnotations();
         System.out.println("Param annos (" + paramAnnos.length + ") : "
             + Arrays.deepToString(paramAnnos));
+        System.out.println("Modifiers: " + meth.getModifiers());
     }
 
     static Object createProxy(Object proxyMe) {
@@ -238,14 +239,15 @@ class MyInvocationHandler implements InvocationHandler {
         // invocation of toString() in the print statements below.
         if (method.getDeclaringClass() == java.lang.Object.class) {
             //System.out.println("!!! object " + method.getName());
-            if (method.getName().equals("toString"))
+            if (method.getName().equals("toString")) {
                 return super.toString();
-            else if (method.getName().equals("hashCode"))
+            } else if (method.getName().equals("hashCode")) {
                 return Integer.valueOf(super.hashCode());
-            else if (method.getName().equals("equals"))
+            } else if (method.getName().equals("equals")) {
                 return Boolean.valueOf(super.equals(args[0]));
-            else
+            } else {
                 throw new RuntimeException("huh?");
+            }
         }
 
         System.out.println("Invoke " + method);
@@ -257,10 +259,11 @@ class MyInvocationHandler implements InvocationHandler {
         }
 
         try {
-            if (true)
+            if (true) {
                 result = method.invoke(mObj, args);
-            else
+            } else {
                 result = -1;
+            }
             System.out.println("Success: method " + method.getName()
                 + " res=" + result);
         } catch (InvocationTargetException ite) {

@@ -449,7 +449,7 @@ class MIRGraph {
   }
 
   bool IsConst(RegLocation loc) const {
-    return (IsConst(loc.orig_sreg));
+    return loc.orig_sreg < 0 ? false : IsConst(loc.orig_sreg);
   }
 
   int32_t ConstantValue(RegLocation loc) const {

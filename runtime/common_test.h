@@ -24,12 +24,15 @@
 #include <sys/types.h>
 
 #include "../../external/icu4c/common/unicode/uvernum.h"
+#include "../compiler/dex/quick/dex_file_to_method_inliner_map.h"
+#include "../compiler/dex/verified_methods_data.h"
+#include "../compiler/driver/compiler_driver.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/unix_file/fd_file.h"
 #include "class_linker.h"
-#include "compiler/driver/compiler_driver.h"
+#include "compiler_callbacks.h"
 #include "dex_file-inl.h"
 #include "entrypoints/entrypoint_utils.h"
 #include "gc/heap.h"
@@ -45,6 +48,8 @@
 #include "ScopedLocalRef.h"
 #include "thread.h"
 #include "UniquePtr.h"
+#include "verifier/method_verifier.h"
+#include "verifier/method_verifier-inl.h"
 #include "well_known_classes.h"
 
 namespace art {
@@ -151,6 +156,108 @@ class ScratchFile {
   std::string filename_;
   UniquePtr<File> file_;
 };
+
+#if defined(__arm__)
+
+#include <sys/ucontext.h>
+
+// A signal handler called when have an illegal instruction.  We record the fact in
+// a global boolean and then increment the PC in the signal context to return to
+// the next instruction.  We know the instruction is an sdiv (4 bytes long).
+static void baddivideinst(int signo, siginfo *si, void *data) {
+  (void)signo;
+  (void)si;
+  struct ucontext *uc = (struct ucontext *)data;
+  struct sigcontext *sc = &uc->uc_mcontext;
+  sc->arm_r0 = 0;     // set R0 to #0 to signal error
+  sc->arm_pc += 4;    // skip offending instruction
+}
+
+// This is in arch/arm/arm_sdiv.S.  It does the following:
+// mov r1,#1
+// sdiv r0,r1,r1
+// bx lr
+//
+// the result will be the value 1 if sdiv is supported.  If it is not supported
+// a SIGILL signal will be raised and the signal handler (baddivideinst) called.
+// The signal handler sets r0 to #0 and then increments pc beyond the failed instruction.
+// Thus if the instruction is not supported, the result of this function will be #0
+
+extern "C" bool CheckForARMSDIVInstruction();
+
+static InstructionSetFeatures GuessInstructionFeatures() {
+  InstructionSetFeatures f;
+
+  // Uncomment this for processing of /proc/cpuinfo.
+  if (false) {
+    // Look in /proc/cpuinfo for features we need.  Only use this when we can guarantee that
+    // the kernel puts the appropriate feature flags in here.  Sometimes it doesn't.
+    std::ifstream in("/proc/cpuinfo");
+    if (in) {
+      while (!in.eof()) {
+        std::string line;
+        std::getline(in, line);
+        if (!in.eof()) {
+          if (line.find("Features") != std::string::npos) {
+            if (line.find("idivt") != std::string::npos) {
+              f.SetHasDivideInstruction(true);
+            }
+          }
+        }
+        in.close();
+      }
+    } else {
+      LOG(INFO) << "Failed to open /proc/cpuinfo";
+    }
+  }
+
+  // See if have a sdiv instruction.  Register a signal handler and try to execute
+  // an sdiv instruction.  If we get a SIGILL then it's not supported.  We can't use
+  // the /proc/cpuinfo method for this because Krait devices don't always put the idivt
+  // feature in the list.
+  struct sigaction sa, osa;
+  sa.sa_flags = SA_ONSTACK | SA_RESTART | SA_SIGINFO;
+  sa.sa_sigaction = baddivideinst;
+  sigaction(SIGILL, &sa, &osa);
+
+  if (CheckForARMSDIVInstruction()) {
+    f.SetHasDivideInstruction(true);
+  }
+
+  // Restore the signal handler.
+  sigaction(SIGILL, &osa, NULL);
+
+  // Other feature guesses in here.
+  return f;
+}
+
+#endif
+
+// Given a set of instruction features from the build, parse it.  The
+// input 'str' is a comma separated list of feature names.  Parse it and
+// return the InstructionSetFeatures object.
+static InstructionSetFeatures ParseFeatureList(std::string str) {
+  InstructionSetFeatures result;
+  typedef std::vector<std::string> FeatureList;
+  FeatureList features;
+  Split(str, ',', features);
+  for (FeatureList::iterator i = features.begin(); i != features.end(); i++) {
+    std::string feature = Trim(*i);
+    if (feature == "default") {
+      // Nothing to do.
+    } else if (feature == "div") {
+      // Supports divide instruction.
+      result.SetHasDivideInstruction(true);
+    } else if (feature == "nodiv") {
+      // Turn off support for divide instruction.
+      result.SetHasDivideInstruction(false);
+    } else {
+      LOG(FATAL) << "Unknown instruction set feature: '" << feature << "'";
+    }
+  }
+  // Others...
+  return result;
+}
 
 class CommonTest : public testing::Test {
  public:
@@ -296,8 +403,18 @@ class CommonTest : public testing::Test {
     std::string min_heap_string(StringPrintf("-Xms%zdm", gc::Heap::kDefaultInitialSize / MB));
     std::string max_heap_string(StringPrintf("-Xmx%zdm", gc::Heap::kDefaultMaximumSize / MB));
 
+    // TODO: make selectable
+#if defined(ART_USE_PORTABLE_COMPILER)
+    CompilerBackend compiler_backend = kPortable;
+#else
+    CompilerBackend compiler_backend = kQuick;
+#endif
+
+    verified_methods_data_.reset(new VerifiedMethodsData);
+    method_inliner_map_.reset(compiler_backend == kQuick ? new DexFileToMethodInlinerMap : nullptr);
+    callbacks_.Reset(verified_methods_data_.get(), method_inliner_map_.get());
     Runtime::Options options;
-    options.push_back(std::make_pair("compiler", reinterpret_cast<void*>(NULL)));
+    options.push_back(std::make_pair("compilercallbacks", static_cast<CompilerCallbacks*>(&callbacks_)));
     options.push_back(std::make_pair("bootclasspath", &boot_class_path_));
     options.push_back(std::make_pair("-Xcheck:jni", reinterpret_cast<void*>(NULL)));
     options.push_back(std::make_pair(min_heap_string.c_str(), reinterpret_cast<void*>(NULL)));
@@ -324,16 +441,6 @@ class CommonTest : public testing::Test {
       instruction_set = kX86;
 #endif
 
-      // TODO: make selectable
-#if defined(ART_USE_PORTABLE_COMPILER)
-      CompilerBackend compiler_backend = kPortable;
-#else
-      CompilerBackend compiler_backend = kQuick;
-#endif
-
-      if (!runtime_->HasResolutionMethod()) {
-        runtime_->SetResolutionMethod(runtime_->CreateResolutionMethod());
-      }
       for (int i = 0; i < Runtime::kLastCalleeSaveType; i++) {
         Runtime::CalleeSaveType type = Runtime::CalleeSaveType(i);
         if (!runtime_->HasCalleeSaveMethod(type)) {
@@ -342,7 +449,10 @@ class CommonTest : public testing::Test {
         }
       }
       class_linker_->FixupDexCaches(runtime_->GetResolutionMethod());
-      compiler_driver_.reset(new CompilerDriver(compiler_backend, instruction_set,
+      compiler_driver_.reset(new CompilerDriver(verified_methods_data_.get(),
+                                                method_inliner_map_.get(),
+                                                compiler_backend, instruction_set,
+                                                instruction_set_features,
                                                 true, new CompilerDriver::DescriptorSet,
                                                 2, true));
     }
@@ -389,6 +499,9 @@ class CommonTest : public testing::Test {
     (*icu_cleanup_fn)();
 
     compiler_driver_.reset();
+    callbacks_.Reset(nullptr, nullptr);
+    method_inliner_map_.reset();
+    verified_methods_data_.reset();
     STLDeleteElements(&opened_dex_files_);
 
     Runtime::Current()->GetHeap()->VerifyHeap();  // Check for heap corruption after the test
@@ -517,6 +630,36 @@ class CommonTest : public testing::Test {
     image_reservation_.reset();
   }
 
+  class TestCompilerCallbacks : public CompilerCallbacks {
+   public:
+    TestCompilerCallbacks() : verified_methods_data_(nullptr), method_inliner_map_(nullptr) { }
+
+    void Reset(VerifiedMethodsData* verified_methods_data,
+               DexFileToMethodInlinerMap* method_inliner_map) {
+        verified_methods_data_ = verified_methods_data;
+        method_inliner_map_ = method_inliner_map;
+    }
+
+    virtual bool MethodVerified(verifier::MethodVerifier* verifier)
+        SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
+      CHECK(verified_methods_data_);
+      bool result = verified_methods_data_->ProcessVerifiedMethod(verifier);
+      if (result && method_inliner_map_ != nullptr) {
+        MethodReference ref = verifier->GetMethodReference();
+        method_inliner_map_->GetMethodInliner(ref.dex_file)
+            ->AnalyseMethodCode(ref.dex_method_index, verifier->CodeItem());
+      }
+      return result;
+    }
+    virtual void ClassRejected(ClassReference ref) {
+      verified_methods_data_->AddRejectedClass(ref);
+    }
+
+   private:
+    VerifiedMethodsData* verified_methods_data_;
+    DexFileToMethodInlinerMap* method_inliner_map_;
+  };
+
   std::string android_data_;
   std::string dalvik_cache_;
   const DexFile* java_lang_dex_file_;  // owned by runtime_
@@ -525,6 +668,9 @@ class CommonTest : public testing::Test {
   UniquePtr<Runtime> runtime_;
   // Owned by the runtime
   ClassLinker* class_linker_;
+  UniquePtr<VerifiedMethodsData> verified_methods_data_;
+  UniquePtr<DexFileToMethodInlinerMap> method_inliner_map_;
+  TestCompilerCallbacks callbacks_;
   UniquePtr<CompilerDriver> compiler_driver_;
 
  private:

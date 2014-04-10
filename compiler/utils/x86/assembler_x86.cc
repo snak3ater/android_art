@@ -65,6 +65,16 @@ void X86Assembler::call(Label* label) {
 }
 
 
+void X86Assembler::call(const ExternalLabel& label) {
+  AssemblerBuffer::EnsureCapacity ensured(&buffer_);
+  intptr_t call_start = buffer_.GetPosition();
+  EmitUint8(0xE8);
+  EmitInt32(label.address());
+  static const intptr_t kCallExternalLabelSize = 5;
+  DCHECK_EQ((buffer_.GetPosition() - call_start), kCallExternalLabelSize);
+}
+
+
 void X86Assembler::pushl(Register reg) {
   AssemblerBuffer::EnsureCapacity ensured(&buffer_);
   EmitUint8(0x50 + reg);
@@ -1573,6 +1583,9 @@ void X86Assembler::LoadRef(ManagedRegister mdest, ManagedRegister base,
   X86ManagedRegister dest = mdest.AsX86();
   CHECK(dest.IsCpuRegister() && dest.IsCpuRegister());
   movl(dest.AsCpuRegister(), Address(base.AsX86().AsCpuRegister(), offs));
+  if (kPoisonHeapReferences) {
+    negl(dest.AsCpuRegister());
+  }
 }
 
 void X86Assembler::LoadRawPtr(ManagedRegister mdest, ManagedRegister base,

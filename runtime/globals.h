@@ -73,6 +73,9 @@ const bool kIsTargetBuild = true;
 const bool kIsTargetBuild = false;
 #endif
 
+// If true, references within the heap are poisoned (negated).
+static constexpr bool kPoisonHeapReferences = false;
+
 }  // namespace art
 
 #endif  // ART_RUNTIME_GLOBALS_H_

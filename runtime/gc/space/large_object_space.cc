@@ -17,11 +17,12 @@
 #include "large_object_space.h"
 
 #include "base/logging.h"
+#include "base/mutex-inl.h"
 #include "base/stl_util.h"
 #include "UniquePtr.h"
 #include "image.h"
 #include "os.h"
-#include "thread.h"
+#include "thread-inl.h"
 #include "utils.h"
 
 namespace art {

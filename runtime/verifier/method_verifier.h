@@ -110,10 +110,8 @@ enum RegisterTrackingMode {
 // execution of that instruction.
 class PcToRegisterLineTable {
  public:
-  PcToRegisterLineTable() {}
-  ~PcToRegisterLineTable() {
-    STLDeleteValues(&pc_to_register_line_);
-  }
+  PcToRegisterLineTable() : size_(0) {}
+  ~PcToRegisterLineTable();
 
   // Initialize the RegisterTable. Every instruction address can have a different set of information
   // about what's in which register, but for verification purposes we only need to store it at
@@ -122,17 +120,13 @@ class PcToRegisterLineTable {
             uint16_t registers_size, MethodVerifier* verifier);
 
   RegisterLine* GetLine(size_t idx) {
-    auto result = pc_to_register_line_.find(idx);
-    if (result == pc_to_register_line_.end()) {
-      return NULL;
-    } else {
-      return result->second;
-    }
+    DCHECK_LT(idx, size_);
+    return register_lines_[idx];
   }
 
  private:
-  typedef SafeMap<int32_t, RegisterLine*> Table;
-  Table pc_to_register_line_;
+  UniquePtr<RegisterLine*[]> register_lines_;
+  size_t size_;
 };
 
 // The verifier
@@ -216,6 +210,8 @@ class MethodVerifier {
   static void Init() SHARED_LOCKS_REQUIRED(Locks::mutator_lock_);
   static void Shutdown();
 
+  static void AddRejectedClass(ClassReference ref)
+      LOCKS_EXCLUDED(rejected_classes_lock_);
   static bool IsClassRejected(ClassReference ref)
       LOCKS_EXCLUDED(rejected_classes_lock_);
 
@@ -621,10 +617,10 @@ class MethodVerifier {
    * encode it in some clever fashion.
    * Returns a pointer to a newly-allocated RegisterMap, or NULL on failure.
    */
-  const std::vector<uint8_t>* GenerateGcMap();
+  const std::vector<uint8_t>* GenerateLengthPrefixedGcMap();
 
   // Verify that the GC map associated with method_ is well formed
-  void VerifyGcMap(const std::vector<uint8_t>& data);
+  void VerifyLengthPrefixedGcMap(const std::vector<uint8_t>& data);
 
   // Compute sizes for GC map data
   void ComputeGcMapSizes(size_t* gc_points, size_t* ref_bitmap_bits, size_t* log2_max_gc_pc);
@@ -636,7 +632,7 @@ class MethodVerifier {
       MethodReferenceComparator> DexGcMapTable;
   static ReaderWriterMutex* dex_gc_maps_lock_ DEFAULT_MUTEX_ACQUIRED_AFTER;
   static DexGcMapTable* dex_gc_maps_ GUARDED_BY(dex_gc_maps_lock_);
-  static void SetDexGcMap(MethodReference ref, const std::vector<uint8_t>& dex_gc_map)
+  static void SetDexGcMap(MethodReference ref, const std::vector<uint8_t>* dex_gc_map)
       LOCKS_EXCLUDED(dex_gc_maps_lock_);
 
 
@@ -666,9 +662,6 @@ class MethodVerifier {
   typedef std::set<ClassReference> RejectedClassesTable;
   static ReaderWriterMutex* rejected_classes_lock_ DEFAULT_MUTEX_ACQUIRED_AFTER;
   static RejectedClassesTable* rejected_classes_ GUARDED_BY(rejected_classes_lock_);
-
-  static void AddRejectedClass(ClassReference ref)
-      LOCKS_EXCLUDED(rejected_classes_lock_);
 
   RegTypeCache reg_types_;
 

@@ -138,7 +138,7 @@ class ClassHelper {
     } else if (klass_->IsArrayClass()) {
       return 2;
     } else if (klass_->IsProxyClass()) {
-      return klass_->GetIfTable()->GetLength();
+      return klass_->GetIfTable()->Count();
     } else {
       const DexFile::TypeList* interfaces = GetInterfaceTypeList();
       if (interfaces == NULL) {
@@ -185,7 +185,7 @@ class ClassHelper {
     std::string descriptor(GetDescriptor());
     const DexFile& dex_file = GetDexFile();
     const DexFile::ClassDef* dex_class_def = GetClassDef();
-    CHECK(dex_class_def != NULL);
+    CHECK(dex_class_def != nullptr) << "No class def for class " << PrettyClass(klass_);
     return dex_file.GetSourceFile(*dex_class_def);
   }
 

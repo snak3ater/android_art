@@ -22,6 +22,8 @@ TEST_COMMON_SRC_FILES := \
 	compiler/image_test.cc \
 	compiler/jni/jni_compiler_test.cc \
 	compiler/oat_test.cc \
+	compiler/optimizing/dominator_test.cc \
+	compiler/optimizing/pretty_printer_test.cc \
 	compiler/output_stream_test.cc \
 	compiler/utils/dedupe_set_test.cc \
 	compiler/utils/arm/managed_register_arm_test.cc \
@@ -43,7 +45,13 @@ TEST_COMMON_SRC_FILES := \
 	runtime/exception_test.cc \
 	runtime/gc/accounting/space_bitmap_test.cc \
 	runtime/gc/heap_test.cc \
-	runtime/gc/space/space_test.cc \
+	runtime/gc/space/dlmalloc_space_base_test.cc \
+	runtime/gc/space/dlmalloc_space_static_test.cc \
+	runtime/gc/space/dlmalloc_space_random_test.cc \
+	runtime/gc/space/rosalloc_space_base_test.cc \
+	runtime/gc/space/rosalloc_space_static_test.cc \
+	runtime/gc/space/rosalloc_space_random_test.cc \
+	runtime/gc/space/large_object_space_test.cc \
 	runtime/gtest_test.cc \
 	runtime/indenter_test.cc \
 	runtime/indirect_reference_table_test.cc \
@@ -58,7 +66,26 @@ TEST_COMMON_SRC_FILES := \
 	runtime/utils_test.cc \
 	runtime/verifier/method_verifier_test.cc \
 	runtime/verifier/reg_type_test.cc \
-	runtime/zip_archive_test.cc
+	runtime/zip_archive_test.cc \
+
+COMPILER_GTEST_COMMON_SRC_FILES := \
+	runtime/jni_internal_test.cc \
+	runtime/proxy_test.cc \
+	compiler/dex/local_value_numbering_test.cc \
+	compiler/driver/compiler_driver_test.cc \
+	compiler/elf_writer_test.cc \
+	compiler/image_test.cc \
+	compiler/jni/jni_compiler_test.cc \
+	compiler/oat_test.cc \
+	compiler/optimizing/codegen_test.cc \
+	compiler/optimizing/dominator_test.cc \
+	compiler/optimizing/pretty_printer_test.cc \
+	compiler/output_stream_test.cc \
+	compiler/utils/arena_allocator_test.cc \
+	compiler/utils/dedupe_set_test.cc \
+	compiler/utils/arm/managed_register_arm_test.cc \
+	compiler/utils/arm64/managed_register_arm64_test.cc \
+	compiler/utils/x86/managed_register_x86_test.cc \
 
 ifeq ($(ART_SEA_IR_MODE),true)
 TEST_COMMON_SRC_FILES += \
@@ -140,11 +167,11 @@ define build-art-test
     LOCAL_CFLAGS += $(ART_HOST_CFLAGS) $(ART_HOST_DEBUG_CFLAGS)
     LOCAL_SHARED_LIBRARIES += libicuuc-host libicui18n-host libnativehelper libz-host
     LOCAL_STATIC_LIBRARIES += libcutils
-    ifeq ($(HOST_OS),darwin)
-      # Mac OS complains about unresolved symbols if you don't include this.
-      LOCAL_WHOLE_STATIC_LIBRARIES := libgtest_host
+    ifneq ($(WITHOUT_HOST_CLANG),true)
+        # GCC host compiled tests fail with this linked, presumably due to destructors that run.
+        LOCAL_STATIC_LIBRARIES += libgtest_host
     endif
-    include $(LLVM_HOST_BUILD_MK)
+    LOCAL_LDLIBS += -lpthread -ldl
     include $(BUILD_HOST_EXECUTABLE)
     art_gtest_exe := $(HOST_OUT_EXECUTABLES)/$$(LOCAL_MODULE)
     ART_HOST_TEST_EXECUTABLES += $$(art_gtest_exe)

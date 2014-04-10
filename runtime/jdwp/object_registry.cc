@@ -118,6 +118,9 @@ mirror::Object* ObjectRegistry::InternalGet(JDWP::ObjectId id) {
 }
 
 jobject ObjectRegistry::GetJObject(JDWP::ObjectId id) {
+  if (id == 0) {
+    return NULL;
+  }
   Thread* self = Thread::Current();
   MutexLock mu(self, lock_);
   id_iterator it = id_to_entry_.find(id);
@@ -130,9 +133,7 @@ void ObjectRegistry::DisableCollection(JDWP::ObjectId id) {
   Thread* self = Thread::Current();
   MutexLock mu(self, lock_);
   id_iterator it = id_to_entry_.find(id);
-  if (it == id_to_entry_.end()) {
-    return;
-  }
+  CHECK(it != id_to_entry_.end());
   Promote(*(it->second));
 }
 
@@ -140,9 +141,7 @@ void ObjectRegistry::EnableCollection(JDWP::ObjectId id) {
   Thread* self = Thread::Current();
   MutexLock mu(self, lock_);
   id_iterator it = id_to_entry_.find(id);
-  if (it == id_to_entry_.end()) {
-    return;
-  }
+  CHECK(it != id_to_entry_.end());
   Demote(*(it->second));
 }
 
@@ -172,9 +171,7 @@ bool ObjectRegistry::IsCollected(JDWP::ObjectId id) {
   Thread* self = Thread::Current();
   MutexLock mu(self, lock_);
   id_iterator it = id_to_entry_.find(id);
-  if (it == id_to_entry_.end()) {
-    return true;  // TODO: can we report that this was an invalid id?
-  }
+  CHECK(it != id_to_entry_.end());
 
   ObjectRegistryEntry& entry = *(it->second);
   if (entry.jni_reference_type == JNIWeakGlobalRefType) {

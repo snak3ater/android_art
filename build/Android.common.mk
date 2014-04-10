@@ -27,7 +27,7 @@ ANDROID_COMMON_MK = true
 # Beware that tests may use the non-debug build for performance, notable 055-enum-performance
 #
 ART_BUILD_TARGET_NDEBUG ?= true
-ART_BUILD_TARGET_DEBUG ?= true
+ART_BUILD_TARGET_DEBUG ?= false
 ART_BUILD_HOST_NDEBUG ?= $(WITH_HOST_DALVIK)
 ART_BUILD_HOST_DEBUG ?= $(WITH_HOST_DALVIK)
 
@@ -87,6 +87,9 @@ include $(LLVM_ROOT_PATH)/llvm.mk
 # Clang build.
 # ART_TARGET_CLANG := true
 # ART_HOST_CLANG := true
+
+# directory used for dalvik-cache on device
+ART_DALVIK_CACHE_DIR := /data/dalvik-cache
 
 # directory used for gtests on device
 ART_NATIVETEST_DIR := /data/nativetest/art

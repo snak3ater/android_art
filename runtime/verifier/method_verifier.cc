@@ -51,7 +51,8 @@ void PcToRegisterLineTable::Init(RegisterTrackingMode mode, InstructionFlags* fl
                                  uint32_t insns_size, uint16_t registers_size,
                                  MethodVerifier* verifier) {
   DCHECK_GT(insns_size, 0U);
-
+  register_lines_.reset(new RegisterLine*[insns_size]());
+  size_ = insns_size;
   for (uint32_t i = 0; i < insns_size; i++) {
     bool interesting = false;
     switch (mode) {
@@ -68,7 +69,16 @@ void PcToRegisterLineTable::Init(RegisterTrackingMode mode, InstructionFlags* fl
         break;
     }
     if (interesting) {
-      pc_to_register_line_.Put(i, new RegisterLine(registers_size, verifier));
+      register_lines_[i] = RegisterLine::Create(registers_size, verifier);
+    }
+  }
+}
+
+PcToRegisterLineTable::~PcToRegisterLineTable() {
+  for (size_t i = 0; i < size_; i++) {
+    delete register_lines_[i];
+    if (kIsDebugBuild) {
+      register_lines_[i] = nullptr;
     }
   }
 }
@@ -79,28 +89,28 @@ MethodVerifier::FailureKind MethodVerifier::VerifyClass(const mirror::Class* kla
   if (klass->IsVerified()) {
     return kNoFailure;
   }
-  mirror::Class* super = klass->GetSuperClass();
-  if (super == NULL && StringPiece(ClassHelper(klass).GetDescriptor()) != "Ljava/lang/Object;") {
-    *error = "Verifier rejected class ";
-    *error += PrettyDescriptor(klass);
-    *error += " that has no super class";
-    return kHardFailure;
-  }
-  if (super != NULL && super->IsFinal()) {
-    *error = "Verifier rejected class ";
-    *error += PrettyDescriptor(klass);
-    *error += " that attempts to sub-class final class ";
-    *error += PrettyDescriptor(super);
-    return kHardFailure;
-  }
+  bool early_failure = false;
+  std::string failure_message;
   ClassHelper kh(klass);
   const DexFile& dex_file = kh.GetDexFile();
   const DexFile::ClassDef* class_def = kh.GetClassDef();
-  if (class_def == NULL) {
-    *error = "Verifier rejected class ";
-    *error += PrettyDescriptor(klass);
-    *error += " that isn't present in dex file ";
-    *error += dex_file.GetLocation();
+  mirror::Class* super = klass->GetSuperClass();
+  if (super == NULL && strcmp("Ljava/lang/Object;", kh.GetDescriptor()) != 0) {
+    early_failure = true;
+    failure_message = " that has no super class";
+  } else if (super != NULL && super->IsFinal()) {
+    early_failure = true;
+    failure_message = " that attempts to sub-class final class " + PrettyDescriptor(super);
+  } else if (class_def == NULL) {
+    early_failure = true;
+    failure_message = " that isn't present in dex file " + dex_file.GetLocation();
+  }
+  if (early_failure) {
+    *error = "Verifier rejected class " + PrettyDescriptor(klass) + failure_message;
+    if (Runtime::Current()->IsCompiler()) {
+      ClassReference ref(&dex_file, klass->GetDexClassDefIndex());
+      AddRejectedClass(ref);
+    }
     return kHardFailure;
   }
   return VerifyClass(&dex_file,
@@ -998,26 +1008,6 @@ bool MethodVerifier::CheckVarArgRangeRegs(uint32_t vA, uint32_t vC) {
   return true;
 }
 
-static const std::vector<uint8_t>* CreateLengthPrefixedDexGcMap(
-    const std::vector<uint8_t>& gc_map) {
-  std::vector<uint8_t>* length_prefixed_gc_map = new std::vector<uint8_t>;
-  length_prefixed_gc_map->reserve(gc_map.size() + 4);
-  length_prefixed_gc_map->push_back((gc_map.size() & 0xff000000) >> 24);
-  length_prefixed_gc_map->push_back((gc_map.size() & 0x00ff0000) >> 16);
-  length_prefixed_gc_map->push_back((gc_map.size() & 0x0000ff00) >> 8);
-  length_prefixed_gc_map->push_back((gc_map.size() & 0x000000ff) >> 0);
-  length_prefixed_gc_map->insert(length_prefixed_gc_map->end(),
-                                 gc_map.begin(),
-                                 gc_map.end());
-  DCHECK_EQ(gc_map.size() + 4, length_prefixed_gc_map->size());
-  DCHECK_EQ(gc_map.size(),
-            static_cast<size_t>((length_prefixed_gc_map->at(0) << 24) |
-                                (length_prefixed_gc_map->at(1) << 16) |
-                                (length_prefixed_gc_map->at(2) << 8) |
-                                (length_prefixed_gc_map->at(3) << 0)));
-  return length_prefixed_gc_map;
-}
-
 bool MethodVerifier::VerifyCodeFlow() {
   uint16_t registers_size = code_item_->registers_size_;
   uint32_t insns_size = code_item_->insns_size_in_code_units_;
@@ -1034,8 +1024,8 @@ bool MethodVerifier::VerifyCodeFlow() {
                   this);
 
 
-  work_line_.reset(new RegisterLine(registers_size, this));
-  saved_line_.reset(new RegisterLine(registers_size, this));
+  work_line_.reset(RegisterLine::Create(registers_size, this));
+  saved_line_.reset(RegisterLine::Create(registers_size, this));
 
   /* Initialize register types of method arguments. */
   if (!SetTypesFromSignature()) {
@@ -1057,16 +1047,15 @@ bool MethodVerifier::VerifyCodeFlow() {
     bool compile = IsCandidateForCompilation(ref, method_access_flags_);
     if (compile) {
       /* Generate a register map and add it to the method. */
-      UniquePtr<const std::vector<uint8_t> > map(GenerateGcMap());
-      if (map.get() == NULL) {
+      const std::vector<uint8_t>* dex_gc_map = GenerateLengthPrefixedGcMap();
+      if (dex_gc_map == NULL) {
         DCHECK_NE(failures_.size(), 0U);
         return false;  // Not a real failure, but a failure to encode
       }
       if (kIsDebugBuild) {
-        VerifyGcMap(*map);
+        VerifyLengthPrefixedGcMap(*dex_gc_map);
       }
-      const std::vector<uint8_t>* dex_gc_map = CreateLengthPrefixedDexGcMap(*(map.get()));
-      verifier::MethodVerifier::SetDexGcMap(ref, *dex_gc_map);
+      verifier::MethodVerifier::SetDexGcMap(ref, dex_gc_map);
     }
 
     if (has_check_casts_) {
@@ -1935,7 +1924,7 @@ bool MethodVerifier::CodeFlowVerifyInstruction(uint32_t* start_guess) {
 
         if (!cast_type.IsUnresolvedTypes() && !orig_type.IsUnresolvedTypes() &&
             !cast_type.GetClass()->IsInterface() && !cast_type.IsAssignableFrom(orig_type)) {
-          RegisterLine* update_line = new RegisterLine(code_item_->registers_size_, this);
+          RegisterLine* update_line = RegisterLine::Create(code_item_->registers_size_, this);
           if (inst->Opcode() == Instruction::IF_EQZ) {
             fallthrough_line.reset(update_line);
           } else {
@@ -2523,7 +2512,6 @@ bool MethodVerifier::CodeFlowVerifyInstruction(uint32_t* start_guess) {
 
     // Special instructions.
     case Instruction::RETURN_VOID_BARRIER:
-      DCHECK(Runtime::Current()->IsStarted()) << PrettyMethod(dex_method_idx_, *dex_file_);
       if (!IsConstructor() || IsStatic()) {
           Fail(VERIFY_ERROR_BAD_CLASS_HARD) << "return-void-barrier not expected";
       }
@@ -3113,6 +3101,8 @@ mirror::ArtMethod* MethodVerifier::GetQuickInvokedMethod(const Instruction* inst
          inst->Opcode() == Instruction::INVOKE_VIRTUAL_RANGE_QUICK);
   const RegType& actual_arg_type = reg_line->GetInvocationThis(inst, is_range);
   if (actual_arg_type.IsConflict()) {  // GetInvocationThis failed.
+    return NULL;
+  } else if (actual_arg_type.IsZero()) {  // Invoke on "null" instance: we can't go further.
     return NULL;
   }
   mirror::Class* this_class = NULL;
@@ -3804,7 +3794,7 @@ bool MethodVerifier::UpdateRegisters(uint32_t next_insn, const RegisterLine* mer
     }
   } else {
     UniquePtr<RegisterLine> copy(gDebugVerify ?
-                                 new RegisterLine(target_line->NumRegs(), this) :
+                                 RegisterLine::Create(target_line->NumRegs(), this) :
                                  NULL);
     if (gDebugVerify) {
       copy->CopyFromLine(target_line);
@@ -3986,7 +3976,7 @@ MethodVerifier::PcToConcreteMethodMap* MethodVerifier::GenerateDevirtMap() {
   return pc_to_concrete_method_map.release();
 }
 
-const std::vector<uint8_t>* MethodVerifier::GenerateGcMap() {
+const std::vector<uint8_t>* MethodVerifier::GenerateLengthPrefixedGcMap() {
   size_t num_entries, ref_bitmap_bits, pc_bits;
   ComputeGcMapSizes(&num_entries, &ref_bitmap_bits, &pc_bits);
   // There's a single byte to encode the size of each bitmap
@@ -4024,7 +4014,12 @@ const std::vector<uint8_t>* MethodVerifier::GenerateGcMap() {
     Fail(VERIFY_ERROR_BAD_CLASS_HARD) << "Failed to encode GC map (size=" << table_size << ")";
     return NULL;
   }
-  table->reserve(table_size);
+  table->reserve(table_size + 4);  // table_size plus the length prefix
+  // Write table size
+  table->push_back((table_size & 0xff000000) >> 24);
+  table->push_back((table_size & 0x00ff0000) >> 16);
+  table->push_back((table_size & 0x0000ff00) >> 8);
+  table->push_back((table_size & 0x000000ff) >> 0);
   // Write table header
   table->push_back(format | ((ref_bitmap_bytes >> DexPcToReferenceMap::kRegMapFormatShift) &
                              ~DexPcToReferenceMap::kRegMapFormatMask));
@@ -4042,14 +4037,18 @@ const std::vector<uint8_t>* MethodVerifier::GenerateGcMap() {
       line->WriteReferenceBitMap(*table, ref_bitmap_bytes);
     }
   }
-  DCHECK_EQ(table->size(), table_size);
+  DCHECK_EQ(table->size(), table_size + 4);  // table_size plus the length prefix
   return table;
 }
 
-void MethodVerifier::VerifyGcMap(const std::vector<uint8_t>& data) {
+void MethodVerifier::VerifyLengthPrefixedGcMap(const std::vector<uint8_t>& data) {
   // Check that for every GC point there is a map entry, there aren't entries for non-GC points,
   // that the table data is well formed and all references are marked (or not) in the bitmap
-  DexPcToReferenceMap map(&data[0], data.size());
+  DCHECK_GE(data.size(), 4u);
+  size_t table_size = data.size() - 4u;
+  DCHECK_EQ(table_size, static_cast<size_t>((data[0] << 24) | (data[1] << 16) |
+                                            (data[2] << 8) | (data[3] << 0)));
+  DexPcToReferenceMap map(&data[4], table_size);
   size_t map_index = 0;
   for (size_t i = 0; i < code_item_->insns_size_in_code_units_; i++) {
     const uint8_t* reg_bitmap = map.FindBitMap(i, false);
@@ -4075,7 +4074,7 @@ void MethodVerifier::VerifyGcMap(const std::vector<uint8_t>& data) {
   }
 }
 
-void MethodVerifier::SetDexGcMap(MethodReference ref, const std::vector<uint8_t>& gc_map) {
+void MethodVerifier::SetDexGcMap(MethodReference ref, const std::vector<uint8_t>* gc_map) {
   DCHECK(Runtime::Current()->IsCompiler());
   {
     WriterMutexLock mu(Thread::Current(), *dex_gc_maps_lock_);
@@ -4084,7 +4083,7 @@ void MethodVerifier::SetDexGcMap(MethodReference ref, const std::vector<uint8_t>
       delete it->second;
       dex_gc_maps_->erase(it);
     }
-    dex_gc_maps_->Put(ref, &gc_map);
+    dex_gc_maps_->Put(ref, gc_map);
   }
   DCHECK(GetDexGcMap(ref) != NULL);
 }
@@ -4160,6 +4159,7 @@ const MethodReference* MethodVerifier::GetDevirtMap(const MethodReference& ref,
 
 std::vector<int32_t> MethodVerifier::DescribeVRegs(uint32_t dex_pc) {
   RegisterLine* line = reg_table_.GetLine(dex_pc);
+  DCHECK(line != nullptr) << "No register line at DEX pc " << StringPrintf("0x%x", dex_pc);
   std::vector<int32_t> result;
   for (size_t i = 0; i < line->NumRegs(); ++i) {
     const RegType& type = line->GetRegisterType(i);

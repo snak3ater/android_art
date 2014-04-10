@@ -1649,7 +1649,7 @@ static std::string DescribeCommand(Request& request) {
  *
  * On entry, the JDWP thread is in VMWAIT.
  */
-void JdwpState::ProcessRequest(Request& request, ExpandBuf* pReply) {
+size_t JdwpState::ProcessRequest(Request& request, ExpandBuf* pReply) {
   JdwpError result = ERR_NONE;
 
   if (request.GetCommandSet() != kJDWPDdmCmdSet) {
@@ -1679,6 +1679,12 @@ void JdwpState::ProcessRequest(Request& request, ExpandBuf* pReply) {
    * told it to resume.
    */
   SetWaitForEventThread(0);
+
+  /*
+   * We do not want events to be sent while we process a request. Indicate the JDWP thread starts
+   * to process a request so other threads wait for it to finish before sending an event.
+   */
+  StartProcessingRequest();
 
   /*
    * Tell the VM that we're running and shouldn't be interrupted by GC.
@@ -1712,14 +1718,11 @@ void JdwpState::ProcessRequest(Request& request, ExpandBuf* pReply) {
    * If we encountered an error, only send the header back.
    */
   uint8_t* replyBuf = expandBufGetBuffer(pReply);
+  size_t replyLength = (result == ERR_NONE) ? expandBufGetLength(pReply) : kJDWPHeaderLen;
+  Set4BE(replyBuf + 0, replyLength);
   Set4BE(replyBuf + 4, request.GetId());
   Set1(replyBuf + 8, kJDWPFlagReply);
   Set2BE(replyBuf + 9, result);
-  if (result == ERR_NONE) {
-    Set4BE(replyBuf + 0, expandBufGetLength(pReply));
-  } else {
-    Set4BE(replyBuf + 0, kJDWPHeaderLen);
-  }
 
   CHECK_GT(expandBufGetLength(pReply), 0U) << GetCommandName(request) << " " << request.GetId();
 
@@ -1741,6 +1744,52 @@ void JdwpState::ProcessRequest(Request& request, ExpandBuf* pReply) {
 
   /* tell the VM that GC is okay again */
   self->TransitionFromRunnableToSuspended(old_state);
+
+  return replyLength;
+}
+
+/*
+ * Indicates a request is about to be processed. If a thread wants to send an event in the meantime,
+ * it will need to wait until we processed this request (see EndProcessingRequest).
+ */
+void JdwpState::StartProcessingRequest() {
+  Thread* self = Thread::Current();
+  CHECK_EQ(self, GetDebugThread()) << "Requests are only processed by debug thread";
+  MutexLock mu(self, process_request_lock_);
+  CHECK_EQ(processing_request_, false);
+  processing_request_ = true;
+}
+
+/*
+ * Indicates a request has been processed (and we sent its reply). All threads waiting for us (see
+ * WaitForProcessingRequest) are waken up so they can send events again.
+ */
+void JdwpState::EndProcessingRequest() {
+  Thread* self = Thread::Current();
+  CHECK_EQ(self, GetDebugThread()) << "Requests are only processed by debug thread";
+  MutexLock mu(self, process_request_lock_);
+  CHECK_EQ(processing_request_, true);
+  processing_request_ = false;
+  process_request_cond_.Broadcast(self);
+}
+
+/*
+ * Waits for any request being processed so we do not send an event in the meantime.
+ */
+void JdwpState::WaitForProcessingRequest() {
+  Thread* self = Thread::Current();
+  CHECK_NE(self, GetDebugThread()) << "Events should not be posted by debug thread";
+  MutexLock mu(self, process_request_lock_);
+  bool waited = false;
+  while (processing_request_) {
+    VLOG(jdwp) << StringPrintf("wait for processing request");
+    waited = true;
+    process_request_cond_.Wait(self);
+  }
+  if (waited) {
+    VLOG(jdwp) << StringPrintf("finished waiting for processing request");
+  }
+  CHECK_EQ(processing_request_, false);
 }
 
 }  // namespace JDWP

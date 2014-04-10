@@ -122,11 +122,12 @@ void JdwpNetStateBase::Close() {
 }
 
 /*
- * Write a packet. Grabs a mutex to assure atomicity.
+ * Write a packet of "length" bytes. Grabs a mutex to assure atomicity.
  */
-ssize_t JdwpNetStateBase::WritePacket(ExpandBuf* pReply) {
+ssize_t JdwpNetStateBase::WritePacket(ExpandBuf* pReply, size_t length) {
   MutexLock mu(Thread::Current(), socket_lock_);
-  return TEMP_FAILURE_RETRY(write(clientSock, expandBufGetBuffer(pReply), expandBufGetLength(pReply)));
+  DCHECK_LE(length, expandBufGetLength(pReply));
+  return TEMP_FAILURE_RETRY(write(clientSock, expandBufGetBuffer(pReply), length));
 }
 
 /*
@@ -173,7 +174,7 @@ void JdwpState::SendRequest(ExpandBuf* pReq) {
   }
 
   errno = 0;
-  ssize_t actual = netState->WritePacket(pReq);
+  ssize_t actual = netState->WritePacket(pReq, expandBufGetLength(pReq));
   if (static_cast<size_t>(actual) != expandBufGetLength(pReq)) {
     PLOG(ERROR) << StringPrintf("Failed to send JDWP packet to debugger (%d of %d)",
                                 actual, expandBufGetLength(pReq));
@@ -217,6 +218,9 @@ JdwpState::JdwpState(const JdwpOptions* options)
       event_thread_lock_("JDWP event thread lock"),
       event_thread_cond_("JDWP event thread condition variable", event_thread_lock_),
       event_thread_id_(0),
+      process_request_lock_("JDWP process request lock"),
+      process_request_cond_("JDWP process request condition variable", process_request_lock_),
+      processing_request_(false),
       ddm_is_active_(false),
       should_exit_(false),
       exit_status_(0) {
@@ -383,9 +387,16 @@ bool JdwpState::HandlePacket() {
   JDWP::Request request(netStateBase->input_buffer_, netStateBase->input_count_);
 
   ExpandBuf* pReply = expandBufAlloc();
-  ProcessRequest(request, pReply);
-  ssize_t cc = netStateBase->WritePacket(pReply);
-  if (cc != (ssize_t) expandBufGetLength(pReply)) {
+  size_t replyLength = ProcessRequest(request, pReply);
+  ssize_t cc = netStateBase->WritePacket(pReply, replyLength);
+
+  /*
+   * We processed this request and sent its reply. Notify other threads waiting for us they can now
+   * send events.
+   */
+  EndProcessingRequest();
+
+  if (cc != static_cast<ssize_t>(replyLength)) {
     PLOG(ERROR) << "Failed sending reply to debugger";
     expandBufFree(pReply);
     return false;

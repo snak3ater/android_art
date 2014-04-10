@@ -35,7 +35,7 @@
 #include "ScopedLocalRef.h"
 #include "ScopedPrimitiveArray.h"
 #include "ScopedUtfChars.h"
-#include "thread.h"
+#include "thread-inl.h"
 
 #if defined(HAVE_PRCTL)
 #include <sys/prctl.h>
@@ -212,10 +212,6 @@ static void EnableKeepCapabilities() {
 
 static void DropCapabilitiesBoundingSet() {
   for (int i = 0; prctl(PR_CAPBSET_READ, i, 0, 0, 0) >= 0; i++) {
-    if (i == CAP_NET_RAW) {
-      // Don't break /system/bin/ping
-      continue;
-    }
     int rc = prctl(PR_CAPBSET_DROP, i, 0, 0, 0);
     if (rc == -1) {
       if (errno == EINVAL) {
@@ -350,13 +346,14 @@ static bool MountEmulatedStorage(uid_t uid, jint mount_mode) {
 
     if (mount_mode == MOUNT_EXTERNAL_MULTIUSER_ALL) {
       // Mount entire external storage tree for all users
-      if (mount(source, target, NULL, MS_BIND, NULL) == -1) {
+      if (TEMP_FAILURE_RETRY(mount(source, target, NULL, MS_BIND, NULL)) == -1) {
         PLOG(WARNING) << "Failed to mount " << source << " to " << target;
         return false;
       }
     } else {
       // Only mount user-specific external storage
-      if (mount(source_user.c_str(), target_user.c_str(), NULL, MS_BIND, NULL) == -1) {
+      if (TEMP_FAILURE_RETRY(
+              mount(source_user.c_str(), target_user.c_str(), NULL, MS_BIND, NULL)) == -1) {
         PLOG(WARNING) << "Failed to mount " << source_user << " to " << target_user;
         return false;
       }
@@ -367,7 +364,8 @@ static bool MountEmulatedStorage(uid_t uid, jint mount_mode) {
     }
 
     // Finally, mount user-specific path into place for legacy users
-    if (mount(target_user.c_str(), legacy, NULL, MS_BIND | MS_REC, NULL) == -1) {
+    if (TEMP_FAILURE_RETRY(
+            mount(target_user.c_str(), legacy, NULL, MS_BIND | MS_REC, NULL)) == -1) {
       PLOG(WARNING) << "Failed to mount " << target_user << " to " << legacy;
       return false;
     }
@@ -524,7 +522,8 @@ static jint Zygote_nativeForkAndSpecialize(JNIEnv* env, jclass, jint uid, jint g
 
 static jint Zygote_nativeForkSystemServer(JNIEnv* env, jclass, uid_t uid, gid_t gid, jintArray gids,
                                           jint debug_flags, jobjectArray rlimits,
-                                          jlong permittedCapabilities, jlong effectiveCapabilities) {
+                                          jlong permittedCapabilities,
+                                          jlong effectiveCapabilities) {
   pid_t pid = ForkAndSpecializeCommon(env, uid, gid, gids,
                                       debug_flags, rlimits,
                                       permittedCapabilities, effectiveCapabilities,

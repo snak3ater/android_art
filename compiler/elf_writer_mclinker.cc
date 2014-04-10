@@ -22,6 +22,7 @@
 #include <mcld/IRBuilder.h>
 #include <mcld/Linker.h>
 #include <mcld/LinkerConfig.h>
+#include <mcld/LinkerScript.h>
 #include <mcld/MC/ZOption.h>
 #include <mcld/Module.h>
 #include <mcld/Support/Path.h>
@@ -142,13 +143,14 @@ void ElfWriterMclinker::Init() {
   }
 
   // Based on alone::Linker::config
-  module_.reset(new mcld::Module(linker_config_->options().soname()));
+  linker_script_.reset(new mcld::LinkerScript());
+  module_.reset(new mcld::Module(linker_config_->options().soname(), *linker_script_.get()));
   CHECK(module_.get() != NULL);
   ir_builder_.reset(new mcld::IRBuilder(*module_.get(), *linker_config_.get()));
   CHECK(ir_builder_.get() != NULL);
   linker_.reset(new mcld::Linker());
   CHECK(linker_.get() != NULL);
-  linker_->config(*linker_config_.get());
+  linker_->emulate(*linker_script_.get(), *linker_config_.get());
 }
 
 void ElfWriterMclinker::AddOatInput(std::vector<uint8_t>& oat_contents) {
@@ -171,7 +173,7 @@ void ElfWriterMclinker::AddOatInput(std::vector<uint8_t>& oat_contents) {
   mcld::LDSection* null_section = ir_builder_->CreateELFHeader(*oat_input_,
                                                                "",
                                                                mcld::LDFileFormat::Null,
-                                                               llvm::ELF::SHT_NULL,
+                                                               SHT_NULL,
                                                                0);
   CHECK(null_section != NULL);
 
@@ -189,9 +191,8 @@ void ElfWriterMclinker::AddOatInput(std::vector<uint8_t>& oat_contents) {
   // TODO: ownership of text_section?
   mcld::LDSection* text_section = ir_builder_->CreateELFHeader(*oat_input_,
                                                                ".text",
-                                                               llvm::ELF::SHT_PROGBITS,
-                                                               llvm::ELF::SHF_EXECINSTR
-                                                               | llvm::ELF::SHF_ALLOC,
+                                                               SHT_PROGBITS,
+                                                               SHF_EXECINSTR | SHF_ALLOC,
                                                                alignment);
   CHECK(text_section != NULL);
 
@@ -262,12 +263,12 @@ void ElfWriterMclinker::AddCompiledCodeInput(const CompiledCode& compiled_code) 
   added_symbols_.Put(&symbol, &symbol);
 
   // Add input to supply code for symbol
-  const std::vector<uint8_t>& code = compiled_code.GetCode();
+  const std::vector<uint8_t>* code = compiled_code.GetPortableCode();
   // TODO: ownership of code_input?
   // TODO: why does IRBuilder::ReadInput take a non-const pointer?
   mcld::Input* code_input = ir_builder_->ReadInput(symbol,
-                                                   const_cast<uint8_t*>(&code[0]),
-                                                   code.size());
+                                                   const_cast<uint8_t*>(&(*code)[0]),
+                                                   code->size());
   CHECK(code_input != NULL);
 }
 
@@ -333,7 +334,7 @@ bool ElfWriterMclinker::Link() {
     PLOG(ERROR) << "Failed to dup file descriptor for " << elf_file_->GetPath();
     return false;
   }
-  if (!linker_->emit(fd)) {
+  if (!linker_->emit(*module_.get(), fd)) {
     LOG(ERROR) << "Failed to emit " << elf_file_->GetPath();
     return false;
   }
@@ -347,7 +348,7 @@ void ElfWriterMclinker::FixupOatMethodOffsets(const std::vector<const DexFile*>&
   UniquePtr<ElfFile> elf_file(ElfFile::Open(elf_file_, true, false));
   CHECK(elf_file.get() != NULL) << elf_file_->GetPath();
 
-  llvm::ELF::Elf32_Addr oatdata_address = GetOatDataAddress(elf_file.get());
+  uint32_t oatdata_address = GetOatDataAddress(elf_file.get());
   DexMethodIterator it(dex_files);
   while (it.HasNext()) {
     const DexFile& dex_file = it.GetDexFile();
@@ -371,7 +372,7 @@ void ElfWriterMclinker::FixupOatMethodOffsets(const std::vector<const DexFile*>&
           (!method->IsStatic() ||
            method->IsConstructor() ||
            method->GetDeclaringClass()->IsInitialized())) {
-        method->SetOatCodeOffset(offset);
+        method->SetPortableOatCodeOffset(offset);
       }
     }
     it.Next();
@@ -380,7 +381,7 @@ void ElfWriterMclinker::FixupOatMethodOffsets(const std::vector<const DexFile*>&
 }
 
 uint32_t ElfWriterMclinker::FixupCompiledCodeOffset(ElfFile& elf_file,
-                                                    llvm::ELF::Elf32_Addr oatdata_address,
+                                                    Elf32_Addr oatdata_address,
                                                     const CompiledCode& compiled_code) {
   const std::string& symbol = compiled_code.GetSymbol();
   SafeMap<const std::string*, uint32_t>::iterator it = symbol_to_compiled_code_offset_.find(&symbol);
@@ -388,9 +389,9 @@ uint32_t ElfWriterMclinker::FixupCompiledCodeOffset(ElfFile& elf_file,
     return it->second;
   }
 
-  llvm::ELF::Elf32_Addr compiled_code_address = elf_file.FindSymbolAddress(llvm::ELF::SHT_SYMTAB,
-                                                                           symbol,
-                                                                           true);
+  Elf32_Addr compiled_code_address = elf_file.FindSymbolAddress(SHT_SYMTAB,
+                                                                symbol,
+                                                                true);
   CHECK_NE(0U, compiled_code_address) << symbol;
   CHECK_LT(oatdata_address, compiled_code_address) << symbol;
   uint32_t compiled_code_offset = compiled_code_address - oatdata_address;

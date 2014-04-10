@@ -83,6 +83,7 @@ define build-art-executable
     else
       LOCAL_CFLAGS += $(ART_HOST_NON_DEBUG_CFLAGS)
     endif
+    LOCAL_LDLIBS += -lpthread
   endif
 
   ifeq ($$(art_ndebug_or_debug),ndebug)
@@ -93,6 +94,12 @@ define build-art-executable
 
   LOCAL_ADDITIONAL_DEPENDENCIES := art/build/Android.common.mk
   LOCAL_ADDITIONAL_DEPENDENCIES += art/build/Android.executable.mk
+
+  ifeq ($$(art_target_or_host),target)
+    LOCAL_MODULE_TARGET_ARCH := $(ART_SUPPORTED_ARCH)
+    #HACK: force 32-bit until 64-bit dex2oat can handle 32-bit
+    LOCAL_32_BIT_ONLY := true
+  endif
 
   ifeq ($$(art_target_or_host),target)
     include $(BUILD_EXECUTABLE)

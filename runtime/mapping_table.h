@@ -54,8 +54,8 @@ class MappingTable {
       DecodeUnsignedLeb128(&table);  // Total_size, unused.
       uint32_t pc_to_dex_size = DecodeUnsignedLeb128(&table);
       for (uint32_t i = 0; i < pc_to_dex_size; ++i) {
-        DecodeUnsignedLeb128(&table);  // Move ptr past native PC.
-        DecodeUnsignedLeb128(&table);  // Move ptr past dex PC.
+        DecodeUnsignedLeb128(&table);  // Move ptr past native PC delta.
+        DecodeSignedLeb128(&table);  // Move ptr past dex PC delta.
       }
     }
     return table;

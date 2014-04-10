@@ -22,7 +22,7 @@
 namespace art {
 
 const uint8_t OatHeader::kOatMagic[] = { 'o', 'a', 't', '\n' };
-const uint8_t OatHeader::kOatVersion[] = { '0', '0', '7', '\0' };
+const uint8_t OatHeader::kOatVersion[] = { '0', '1', '4', '\0' };
 
 OatHeader::OatHeader() {
   memset(this, 0, sizeof(*this));
@@ -120,7 +120,8 @@ const void* OatHeader::GetInterpreterToInterpreterBridge() const {
 
 uint32_t OatHeader::GetInterpreterToInterpreterBridgeOffset() const {
   DCHECK(IsValid());
-  CHECK_GE(interpreter_to_interpreter_bridge_offset_, executable_offset_);
+  CHECK(interpreter_to_interpreter_bridge_offset_ == 0 ||
+        interpreter_to_interpreter_bridge_offset_ >= executable_offset_);
   return interpreter_to_interpreter_bridge_offset_;
 }
 

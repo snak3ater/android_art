@@ -682,11 +682,11 @@ void CompilerDriver::LoadImageClasses(base::TimingLogger& timings)
   ScopedObjectAccess soa(self);
   ClassLinker* class_linker = Runtime::Current()->GetClassLinker();
   for (auto it = image_classes_->begin(), end = image_classes_->end(); it != end;) {
-    std::string descriptor(*it);
+    const std::string& descriptor(*it);
     SirtRef<mirror::Class> klass(self, class_linker->FindSystemClass(descriptor.c_str()));
     if (klass.get() == NULL) {
-      image_classes_->erase(it++);
       VLOG(compiler) << "Failed to find class " << descriptor;
+      image_classes_->erase(it++);
       self->ClearException();
     } else {
       ++it;
@@ -901,14 +901,13 @@ static mirror::Class* ComputeCompilingMethodsClass(ScopedObjectAccess& soa,
                                               dex_cache, class_loader);
 }
 
-static mirror::ArtField* ComputeFieldReferencedFromCompilingMethod(ScopedObjectAccess& soa,
-                                                                const DexCompilationUnit* mUnit,
-                                                                uint32_t field_idx)
+static mirror::ArtField* ComputeFieldReferencedFromCompilingMethod(
+    ScopedObjectAccess& soa, const DexCompilationUnit* mUnit, uint32_t field_idx, bool is_static)
     SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
   mirror::DexCache* dex_cache = mUnit->GetClassLinker()->FindDexCache(*mUnit->GetDexFile());
   mirror::ClassLoader* class_loader = soa.Decode<mirror::ClassLoader*>(mUnit->GetClassLoader());
   return mUnit->GetClassLinker()->ResolveField(*mUnit->GetDexFile(), field_idx, dex_cache,
-                                               class_loader, false);
+                                               class_loader, is_static);
 }
 
 static mirror::ArtMethod* ComputeMethodReferencedFromCompilingMethod(ScopedObjectAccess& soa,
@@ -929,7 +928,8 @@ bool CompilerDriver::ComputeInstanceFieldInfo(uint32_t field_idx, const DexCompi
   field_offset = -1;
   is_volatile = true;
   // Try to resolve field and ignore if an Incompatible Class Change Error (ie is static).
-  mirror::ArtField* resolved_field = ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx);
+  mirror::ArtField* resolved_field =
+      ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx, false);
   if (resolved_field != NULL && !resolved_field->IsStatic()) {
     mirror::Class* referrer_class =
         ComputeCompilingMethodsClass(soa, resolved_field->GetDeclaringClass()->GetDexCache(),
@@ -980,7 +980,8 @@ bool CompilerDriver::ComputeStaticFieldInfo(uint32_t field_idx, const DexCompila
   is_referrers_class = false;
   is_volatile = true;
   // Try to resolve field and ignore if an Incompatible Class Change Error (ie isn't static).
-  mirror::ArtField* resolved_field = ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx);
+  mirror::ArtField* resolved_field =
+      ComputeFieldReferencedFromCompilingMethod(soa, mUnit, field_idx, true);
   if (resolved_field != NULL && resolved_field->IsStatic()) {
     mirror::Class* referrer_class =
         ComputeCompilingMethodsClass(soa, resolved_field->GetDeclaringClass()->GetDexCache(),
@@ -1373,11 +1374,9 @@ class ParallelCompilationManager {
     self->AssertNoPendingException();
     CHECK_GT(work_units, 0U);
 
-    std::vector<ForAllClosure*> closures(work_units);
     index_ = begin;
     for (size_t i = 0; i < work_units; ++i) {
-      closures[i] = new ForAllClosure(this, end, callback);
-      thread_pool_->AddTask(self, closures[i]);
+      thread_pool_->AddTask(self, new ForAllClosure(this, end, callback));
     }
     thread_pool_->StartWorkers(self);
 
@@ -1614,13 +1613,11 @@ void CompilerDriver::ResolveDexFile(jobject class_loader, const DexFile& dex_fil
   if (IsImage()) {
     // For images we resolve all types, such as array, whereas for applications just those with
     // classdefs are resolved by ResolveClassFieldsAndMethods.
-    // TODO: strdup memory leak.
-    timings.NewSplit(strdup(("Resolve " + dex_file.GetLocation() + " Types").c_str()));
+    timings.NewSplit("Resolve Types");
     context.ForAll(0, dex_file.NumTypeIds(), ResolveType, thread_count_);
   }
 
-  // TODO: strdup memory leak.
-  timings.NewSplit(strdup(("Resolve " + dex_file.GetLocation() + " MethodsAndFields").c_str()));
+  timings.NewSplit("Resolve MethodsAndFields");
   context.ForAll(0, dex_file.NumClassDefs(), ResolveClassFieldsAndMethods, thread_count_);
 }
 
@@ -1680,8 +1677,7 @@ static void VerifyClass(const ParallelCompilationManager* manager, size_t class_
 
 void CompilerDriver::VerifyDexFile(jobject class_loader, const DexFile& dex_file,
                                    ThreadPool& thread_pool, base::TimingLogger& timings) {
-  // TODO: strdup memory leak.
-  timings.NewSplit(strdup(("Verify " + dex_file.GetLocation()).c_str()));
+  timings.NewSplit("Verify Dex File");
   ClassLinker* class_linker = Runtime::Current()->GetClassLinker();
   ParallelCompilationManager context(class_linker, class_loader, this, &dex_file, thread_pool);
   context.ForAll(0, dex_file.NumClassDefs(), VerifyClass, thread_count_);
@@ -2003,6 +1999,7 @@ static const char* class_initializer_black_list[] = {
   "Ljava/net/Inet6Address;",  // Sub-class of InetAddress.
   "Ljava/net/InetUnixAddress;",  // Sub-class of InetAddress.
   "Ljava/net/NetworkInterface;",  // Calls to Random.<init> -> System.currentTimeMillis -> OsConstants.initConstants.
+  "Ljava/net/StandardSocketOptions;",  // Call System.identityHashCode.
   "Ljava/nio/charset/Charset;",  // Calls Charset.getDefaultCharset -> System.getProperty -> OsConstants.initConstants.
   "Ljava/nio/charset/CharsetICU;",  // Sub-class of Charset.
   "Ljava/nio/charset/Charsets;",  // Calls Charset.forName.
@@ -2185,8 +2182,7 @@ static void InitializeClass(const ParallelCompilationManager* manager, size_t cl
 
 void CompilerDriver::InitializeClasses(jobject jni_class_loader, const DexFile& dex_file,
                                        ThreadPool& thread_pool, base::TimingLogger& timings) {
-  // TODO: strdup memory leak.
-  timings.NewSplit(strdup(("InitializeNoClinit " + dex_file.GetLocation()).c_str()));
+  timings.NewSplit("InitializeNoClinit");
 #ifndef NDEBUG
   // Sanity check blacklist descriptors.
   if (IsImage()) {
@@ -2293,8 +2289,7 @@ void CompilerDriver::CompileClass(const ParallelCompilationManager* manager, siz
 
 void CompilerDriver::CompileDexFile(jobject class_loader, const DexFile& dex_file,
                                     ThreadPool& thread_pool, base::TimingLogger& timings) {
-  // TODO: strdup memory leak.
-  timings.NewSplit(strdup(("Compile " + dex_file.GetLocation()).c_str()));
+  timings.NewSplit("Compile Dex File");
   ParallelCompilationManager context(Runtime::Current()->GetClassLinker(), class_loader, this,
                                      &dex_file, thread_pool);
   context.ForAll(0, dex_file.NumClassDefs(), CompilerDriver::CompileClass, thread_count_);

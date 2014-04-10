@@ -648,9 +648,12 @@ JDWP::JdwpError Dbg::GetModifiers(JDWP::RefTypeId id, JDWP::ExpandBuf* pReply) {
 
   uint32_t access_flags = c->GetAccessFlags() & kAccJavaFlagsMask;
 
-  // Set ACC_SUPER; dex files don't contain this flag, but all classes are supposed to have it set.
+  // Set ACC_SUPER. Dex files don't contain this flag but only classes are supposed to have it set,
+  // not interfaces.
   // Class.getModifiers doesn't return it, but JDWP does, so we set it here.
-  access_flags |= kAccSuper;
+  if ((access_flags & kAccInterface) == 0) {
+    access_flags |= kAccSuper;
+  }
 
   expandBufAdd4BE(pReply, access_flags);
 
@@ -666,13 +669,14 @@ JDWP::JdwpError Dbg::GetMonitorInfo(JDWP::ObjectId object_id, JDWP::ExpandBuf* r
 
   // Ensure all threads are suspended while we read objects' lock words.
   Thread* self = Thread::Current();
-  Locks::mutator_lock_->SharedUnlock(self);
-  Locks::mutator_lock_->ExclusiveLock(self);
+  CHECK_EQ(self->GetState(), kRunnable);
+  self->TransitionFromRunnableToSuspended(kSuspended);
+  Runtime::Current()->GetThreadList()->SuspendAll();
 
   MonitorInfo monitor_info(o);
 
-  Locks::mutator_lock_->ExclusiveUnlock(self);
-  Locks::mutator_lock_->SharedLock(self);
+  Runtime::Current()->GetThreadList()->ResumeAll();
+  self->TransitionFromSuspendedToRunnable();
 
   if (monitor_info.owner != NULL) {
     expandBufAddObjectId(reply, gRegistry->Add(monitor_info.owner->GetPeer()));
@@ -810,25 +814,60 @@ JDWP::JdwpError Dbg::GetReferringObjects(JDWP::ObjectId object_id, int32_t max_c
 
 JDWP::JdwpError Dbg::DisableCollection(JDWP::ObjectId object_id)
     SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
+  mirror::Object* o = gRegistry->Get<mirror::Object*>(object_id);
+  if (o == NULL || o == ObjectRegistry::kInvalidObject) {
+    return JDWP::ERR_INVALID_OBJECT;
+  }
   gRegistry->DisableCollection(object_id);
   return JDWP::ERR_NONE;
 }
 
 JDWP::JdwpError Dbg::EnableCollection(JDWP::ObjectId object_id)
     SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
+  mirror::Object* o = gRegistry->Get<mirror::Object*>(object_id);
+  // Unlike DisableCollection, JDWP specs do not state an invalid object causes an error. The RI
+  // also ignores these cases and never return an error. However it's not obvious why this command
+  // should behave differently from DisableCollection and IsCollected commands. So let's be more
+  // strict and return an error if this happens.
+  if (o == NULL || o == ObjectRegistry::kInvalidObject) {
+    return JDWP::ERR_INVALID_OBJECT;
+  }
   gRegistry->EnableCollection(object_id);
   return JDWP::ERR_NONE;
 }
 
 JDWP::JdwpError Dbg::IsCollected(JDWP::ObjectId object_id, bool& is_collected)
     SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
-  is_collected = gRegistry->IsCollected(object_id);
+  if (object_id == 0) {
+    // Null object id is invalid.
+    return JDWP::ERR_INVALID_OBJECT;
+  }
+  // JDWP specs state an INVALID_OBJECT error is returned if the object ID is not valid. However
+  // the RI seems to ignore this and assume object has been collected.
+  mirror::Object* o = gRegistry->Get<mirror::Object*>(object_id);
+  if (o == NULL || o == ObjectRegistry::kInvalidObject) {
+    is_collected = true;
+  } else {
+    is_collected = gRegistry->IsCollected(object_id);
+  }
   return JDWP::ERR_NONE;
 }
 
 void Dbg::DisposeObject(JDWP::ObjectId object_id, uint32_t reference_count)
     SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
   gRegistry->DisposeObject(object_id, reference_count);
+}
+
+static JDWP::JdwpTypeTag GetTypeTag(mirror::Class* klass)
+    SHARED_LOCKS_REQUIRED(Locks::mutator_lock_) {
+  DCHECK(klass != nullptr);
+  if (klass->IsArrayClass()) {
+    return JDWP::TT_ARRAY;
+  } else if (klass->IsInterface()) {
+    return JDWP::TT_INTERFACE;
+  } else {
+    return JDWP::TT_CLASS;
+  }
 }
 
 JDWP::JdwpError Dbg::GetReflectedType(JDWP::RefTypeId class_id, JDWP::ExpandBuf* pReply) {
@@ -838,7 +877,8 @@ JDWP::JdwpError Dbg::GetReflectedType(JDWP::RefTypeId class_id, JDWP::ExpandBuf*
     return status;
   }
 
-  expandBufAdd1(pReply, c->IsInterface() ? JDWP::TT_INTERFACE : JDWP::TT_CLASS);
+  JDWP::JdwpTypeTag type_tag = GetTypeTag(c);
+  expandBufAdd1(pReply, type_tag);
   expandBufAddRefTypeId(pReply, class_id);
   return JDWP::ERR_NONE;
 }
@@ -912,14 +952,7 @@ JDWP::JdwpError Dbg::GetReferenceType(JDWP::ObjectId object_id, JDWP::ExpandBuf*
     return JDWP::ERR_INVALID_OBJECT;
   }
 
-  JDWP::JdwpTypeTag type_tag;
-  if (o->GetClass()->IsArrayClass()) {
-    type_tag = JDWP::TT_ARRAY;
-  } else if (o->GetClass()->IsInterface()) {
-    type_tag = JDWP::TT_INTERFACE;
-  } else {
-    type_tag = JDWP::TT_CLASS;
-  }
+  JDWP::JdwpTypeTag type_tag = GetTypeTag(o->GetClass());
   JDWP::RefTypeId type_id = gRegistry->AddRefType(o->GetClass());
 
   expandBufAdd1(pReply, type_tag);
@@ -943,6 +976,9 @@ JDWP::JdwpError Dbg::GetSourceFile(JDWP::RefTypeId class_id, std::string& result
   mirror::Class* c = DecodeClass(class_id, status);
   if (c == NULL) {
     return status;
+  }
+  if (c->IsProxyClass()) {
+    return JDWP::ERR_ABSENT_INFORMATION;
   }
   result = ClassHelper(c).GetSourceFile();
   return JDWP::ERR_NONE;
@@ -1173,8 +1209,8 @@ static void SetLocation(JDWP::JdwpLocation& location, mirror::ArtMethod* m, uint
     memset(&location, 0, sizeof(location));
   } else {
     mirror::Class* c = m->GetDeclaringClass();
-    location.type_tag = c->IsInterface() ? JDWP::TT_INTERFACE : JDWP::TT_CLASS;
-    location.class_id = gRegistry->Add(c);
+    location.type_tag = GetTypeTag(c);
+    location.class_id = gRegistry->AddRefType(c);
     location.method_id = ToMethodId(m);
     location.dex_pc = dex_pc;
   }
@@ -2286,8 +2322,9 @@ void Dbg::PostClassPrepare(mirror::Class* c) {
   // debuggers seem to like that.  There might be some advantage to honesty,
   // since the class may not yet be verified.
   int state = JDWP::CS_VERIFIED | JDWP::CS_PREPARED;
-  JDWP::JdwpTypeTag tag = c->IsInterface() ? JDWP::TT_INTERFACE : JDWP::TT_CLASS;
-  gJdwpState->PostClassPrepare(tag, gRegistry->Add(c), ClassHelper(c).GetDescriptor(), state);
+  JDWP::JdwpTypeTag tag = GetTypeTag(c);
+  gJdwpState->PostClassPrepare(tag, gRegistry->Add(c),
+                               ClassHelper(c).GetDescriptor(), state);
 }
 
 void Dbg::UpdateDebugger(Thread* thread, mirror::Object* this_object,
@@ -2719,7 +2756,7 @@ JDWP::JdwpError Dbg::InvokeMethod(JDWP::ObjectId thread_id, JDWP::ObjectId objec
         if (argument == ObjectRegistry::kInvalidObject) {
           return JDWP::ERR_INVALID_OBJECT;
         }
-        if (!argument->InstanceOf(parameter_type)) {
+        if (argument != NULL && !argument->InstanceOf(parameter_type)) {
           return JDWP::ERR_ILLEGAL_ARGUMENT;
         }
 
@@ -3434,8 +3471,6 @@ void Dbg::DdmSendHeapSegments(bool native) {
   } else {
     gc::Heap* heap = Runtime::Current()->GetHeap();
     const std::vector<gc::space::ContinuousSpace*>& spaces = heap->GetContinuousSpaces();
-    Thread* self = Thread::Current();
-    ReaderMutexLock mu(self, *Locks::heap_bitmap_lock_);
     typedef std::vector<gc::space::ContinuousSpace*>::const_iterator It;
     for (It cur = spaces.begin(), end = spaces.end(); cur != end; ++cur) {
       if ((*cur)->IsDlMallocSpace()) {
